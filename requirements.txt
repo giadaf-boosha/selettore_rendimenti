@@ -1,0 +1,22 @@
+# Core
+streamlit>=1.30.0
+pandas>=2.0.0
+python-dotenv>=1.0.0
+
+# Scrapers
+justetf-scraping @ git+https://github.com/druzsan/justetf-scraping.git
+mstarpy>=4.0.0
+investiny>=0.7.0
+
+# Excel
+openpyxl>=3.1.0
+xlsxwriter>=3.1.0
+
+# Utilities
+requests>=2.31.0
+tenacity>=8.2.0
+
+# Testing
+pytest>=7.4.0
+pytest-cov>=4.1.0
+responses>=0.23.0
