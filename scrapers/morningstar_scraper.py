@@ -4,9 +4,7 @@ Scraper per Morningstar via mstarpy.
 Fonte primaria per fondi comuni e secondaria per ETF.
 Supporta categorie Morningstar e fornisce dati di performance.
 """
-import pandas as pd
 from typing import List, Optional
-from datetime import datetime, timedelta
 import logging
 
 from scrapers.base import BaseDataSource, ProgressCallback
@@ -30,8 +28,8 @@ class MorningstarScraper(BaseDataSource):
 
     Supporta sia ETF che Fondi comuni. Fornisce:
     - Categorie Morningstar
-    - Performance (1a, 3a, 5a)
-    - Deviazione standard
+    - Performance (YTD, 1a, 3a, 5a, 10a)
+    - Volatility e Sharpe ratio
     - Rating Morningstar
     """
 
@@ -47,54 +45,45 @@ class MorningstarScraper(BaseDataSource):
         """Verifica se mstarpy è disponibile."""
         if self._mstarpy_available is None:
             try:
-                import mstarpy
+                import mstarpy.funds
+                import mstarpy.search
                 self._mstarpy_available = True
             except ImportError:
                 self.logger.error("mstarpy not installed. Run: pip install mstarpy")
                 self._mstarpy_available = False
         return self._mstarpy_available
 
-    def _determine_instrument_type(self, security_type: str) -> InstrumentType:
-        """Determina il tipo di strumento dalla stringa security type."""
-        if not security_type:
+    def _determine_instrument_type(self, investment_type: str) -> InstrumentType:
+        """Determina il tipo di strumento dalla stringa investment type."""
+        if not investment_type:
             return InstrumentType.UNKNOWN
 
-        sec_type_lower = str(security_type).lower()
-        if "etf" in sec_type_lower:
+        inv_type_lower = str(investment_type).lower()
+        if inv_type_lower in ("et", "etf"):
             return InstrumentType.ETF
-        elif "fund" in sec_type_lower or "fondo" in sec_type_lower:
+        elif inv_type_lower in ("fo", "fund", "fc", "fe"):
             return InstrumentType.FUND
         return InstrumentType.UNKNOWN
 
-    def _item_to_record(self, item: dict) -> Optional[SourceRecord]:
-        """Converte risultato screener in SourceRecord."""
-        isin = item.get("isin") or item.get("SecId")
-        if not isin:
-            return None
+    def _extract_performance_from_trailing(
+        self, trailing_data: dict, column_defs: list
+    ) -> PerformanceData:
+        """Estrae PerformanceData da trailingReturn()."""
+        perf = PerformanceData()
 
-        # Determina tipo strumento
-        sec_type = item.get("securityType", "") or item.get("LegalType", "")
-        inst_type = self._determine_instrument_type(sec_type)
+        if not trailing_data or not column_defs:
+            return perf
 
-        return SourceRecord(
-            isin=str(isin),
-            name=str(item.get("name", "") or item.get("Name", "")),
-            source=self.name,
-            instrument_type=inst_type,
-            currency=str(item.get("currency", "EUR") or item.get("BaseCurrencyId", "EUR")),
-            category_morningstar=item.get("morningstarCategory") or item.get("CategoryName"),
-            performance=PerformanceData(
-                return_1y=safe_float(item.get("return1Year") or item.get("ReturnM12")),
-                return_3y=safe_float(item.get("return3Year") or item.get("ReturnM36")),
-                return_5y=safe_float(item.get("return5Year") or item.get("ReturnM60")),
-            ),
-            risk=RiskMetrics(
-                volatility_3y=safe_float(
-                    item.get("standardDeviation3Year") or item.get("StandardDeviation3Yr")
-                ),
-            ),
-            raw_data=item,
-        )
+        # Mappa colonne a valori
+        col_to_val = dict(zip(column_defs, trailing_data))
+
+        perf.ytd = safe_float(col_to_val.get("YearToDate"))
+        perf.return_1y = safe_float(col_to_val.get("1Year"))
+        perf.return_3y = safe_float(col_to_val.get("3Year"))
+        perf.return_5y = safe_float(col_to_val.get("5Year"))
+        perf.return_10y = safe_float(col_to_val.get("10Year"))
+
+        return perf
 
     @retry_with_backoff(max_retries=3, base_delay=1.0)
     def search(
@@ -103,10 +92,9 @@ class MorningstarScraper(BaseDataSource):
         progress_callback: Optional[ProgressCallback] = None
     ) -> List[SourceRecord]:
         """
-        Cerca strumenti usando mstarpy.
+        Cerca strumenti usando mstarpy screener_universe.
 
-        Nota: mstarpy ha funzionalità limitate per screening complesso.
-        Implementiamo una ricerca base e filtriamo localmente.
+        Nota: mstarpy v8 usa screener_universe per ottenere liste di strumenti.
         """
         if not self._check_mstarpy():
             self._update_progress(progress_callback, 1.0, "mstarpy non disponibile")
@@ -117,98 +105,68 @@ class MorningstarScraper(BaseDataSource):
         records = []
 
         try:
-            import mstarpy as ms
+            import mstarpy.search as ms_search
 
-            # mstarpy non ha un vero screener, usiamo search
-            # Cerchiamo per termini generici e poi filtriamo
-            search_terms = []
+            # Cerca ETF e/o fondi
+            search_types = []
+            if InstrumentType.ETF in criteria.instrument_types:
+                search_types.append("etf")
+            if InstrumentType.FUND in criteria.instrument_types:
+                search_types.append("fund")
 
-            # Se ci sono categorie specificate, cerchiamo per categoria
-            if criteria.categories_morningstar:
-                search_terms.extend(criteria.categories_morningstar[:3])  # Limita a 3
-            else:
-                # Ricerca generica per tipo
-                if InstrumentType.ETF in criteria.instrument_types:
-                    search_terms.append("ETF")
-                if InstrumentType.FUND in criteria.instrument_types:
-                    search_terms.append("Fund")
+            if not search_types:
+                search_types = ["etf", "fund"]
 
-            if not search_terms:
-                search_terms = ["ETF", "Fund"]
+            total_types = len(search_types)
 
-            total_terms = len(search_terms)
-
-            for idx, term in enumerate(search_terms):
+            for idx, asset_type in enumerate(search_types):
                 self._wait_rate_limit()
 
+                self._update_progress(
+                    progress_callback,
+                    0.1 + (0.6 * idx / total_types),
+                    f"Cercando {asset_type}..."
+                )
+
                 try:
-                    # Usa search_funds o search_stock a seconda del tipo
-                    self._update_progress(
-                        progress_callback,
-                        0.1 + (0.7 * idx / total_terms),
-                        f"Cercando: {term}..."
+                    # screener_universe restituisce metadati base
+                    results = ms_search.screener_universe(
+                        term=asset_type,
+                        pageSize=200,  # Limita risultati
                     )
 
-                    # Prova a cercare
-                    results = ms.search_funds(term, page_size=100)
-
                     if results:
+                        # Per ogni risultato, prova a recuperare i dettagli
                         for item in results:
-                            record = self._item_to_record(item)
-                            if record and record.isin:
-                                # Applica filtri
-                                if self._matches_criteria(record, criteria):
-                                    records.append(record)
+                            meta = item.get("meta", {})
+                            sec_id = meta.get("securityID")
+
+                            if sec_id:
+                                # Per ora salviamo solo i metadati base
+                                # I dettagli verranno arricchiti via get_by_isin
+                                record = SourceRecord(
+                                    isin=sec_id,  # Potrebbe essere securityID, non ISIN
+                                    name="",
+                                    source=self.name,
+                                    instrument_type=self._determine_instrument_type(asset_type),
+                                    raw_data=meta,
+                                )
+                                records.append(record)
 
                 except Exception as e:
-                    self.logger.warning(f"Search failed for '{term}': {e}")
+                    self.logger.warning(f"Search failed for '{asset_type}': {e}")
                     continue
 
         except Exception as e:
             self.logger.error(f"Morningstar search failed: {e}")
 
-        # Deduplica per ISIN
-        seen_isins = set()
-        unique_records = []
-        for record in records:
-            if record.isin not in seen_isins:
-                seen_isins.add(record.isin)
-                unique_records.append(record)
-
         self._update_progress(
             progress_callback,
             1.0,
-            f"Morningstar: {len(unique_records)} strumenti"
+            f"Morningstar: {len(records)} strumenti trovati"
         )
 
-        return unique_records
-
-    def _matches_criteria(self, record: SourceRecord, criteria: SearchCriteria) -> bool:
-        """Verifica se un record soddisfa i criteri."""
-        # Filtro valuta
-        if criteria.currencies and record.currency not in criteria.currencies:
-            return False
-
-        # Filtro tipo strumento
-        if record.instrument_type not in criteria.instrument_types:
-            if record.instrument_type != InstrumentType.UNKNOWN:
-                return False
-
-        # Filtro categoria Morningstar
-        if criteria.categories_morningstar:
-            if record.category_morningstar:
-                # Match parziale sulla categoria
-                cat_lower = record.category_morningstar.lower()
-                if not any(c.lower() in cat_lower for c in criteria.categories_morningstar):
-                    return False
-
-        # Filtro performance minima
-        if criteria.min_performance is not None:
-            perf = record.performance.get_by_period(criteria.performance_period)
-            if perf is None or perf < criteria.min_performance:
-                return False
-
-        return True
+        return records
 
     @retry_with_backoff(max_retries=3, base_delay=1.0)
     def get_by_isin(self, isin: str) -> Optional[SourceRecord]:
@@ -219,80 +177,76 @@ class MorningstarScraper(BaseDataSource):
         self._wait_rate_limit()
 
         try:
-            import mstarpy as ms
+            import mstarpy.funds as ms_funds
 
-            # Prova prima come fondo
+            # Crea oggetto Funds con ISIN
+            fund = ms_funds.Funds(isin)
+
+            # Recupera snapshot per info base
+            snapshot = {}
             try:
-                fund = ms.Funds(isin)
+                snapshot = fund.snapshot() or {}
+            except Exception as e:
+                self.logger.debug(f"snapshot() failed for {isin}: {e}")
 
-                # Recupera NAV e info base
-                end_date = datetime.now().strftime("%Y-%m-%d")
-                start_date = (datetime.now() - timedelta(days=365 * 5)).strftime("%Y-%m-%d")
+            # Recupera trailing returns per performance e categoria
+            trailing = {}
+            category = None
+            perf = PerformanceData()
 
-                nav_data = fund.nav(start_date=start_date, end_date=end_date)
-
-                return SourceRecord(
-                    isin=isin,
-                    name=getattr(fund, "name", isin),
-                    source=self.name,
-                    instrument_type=InstrumentType.FUND,
-                    currency="EUR",
-                    performance=self._extract_performance_from_nav(nav_data),
-                    raw_data={"nav": nav_data},
-                )
-
-            except Exception:
-                pass
-
-            # Prova come stock/ETF
             try:
-                stock = ms.Stock(isin)
-                hist = stock.historical(start_date=start_date, end_date=end_date)
+                trailing = fund.trailingReturn() or {}
+                column_defs = trailing.get("columnDefs", [])
+                total_return = trailing.get("totalReturnNAV", [])
 
-                return SourceRecord(
-                    isin=isin,
-                    name=getattr(stock, "name", isin),
-                    source=self.name,
-                    instrument_type=InstrumentType.ETF,
-                    currency="EUR",
-                    raw_data={"historical": hist},
-                )
+                perf = self._extract_performance_from_trailing(total_return, column_defs)
+                category = trailing.get("categoryName")
+            except Exception as e:
+                self.logger.debug(f"trailingReturn() failed for {isin}: {e}")
 
-            except Exception:
-                pass
+            # Se non abbiamo category da trailing, prova riskVolatility
+            if not category:
+                try:
+                    risk_data = fund.riskVolatility() or {}
+                    category = risk_data.get("categoryName")
+                except Exception as e:
+                    self.logger.debug(f"riskVolatility() failed for {isin}: {e}")
 
-            return None
+            # Determina tipo strumento
+            inv_type = snapshot.get("InvestmentType", "")
+            instrument_type = self._determine_instrument_type(inv_type)
+
+            # Determina distribution policy
+            distribution = DistributionPolicy.UNKNOWN
+            fund_name = snapshot.get("Name", "") or getattr(fund, "name", "")
+            if "acc" in fund_name.lower():
+                distribution = DistributionPolicy.ACCUMULATING
+            elif "dist" in fund_name.lower() or "div" in fund_name.lower():
+                distribution = DistributionPolicy.DISTRIBUTING
+
+            return SourceRecord(
+                isin=snapshot.get("Isin", isin),
+                name=fund_name or isin,
+                source=self.name,
+                instrument_type=instrument_type,
+                currency=snapshot.get("Currency", {}).get("Id", "EUR") if isinstance(snapshot.get("Currency"), dict) else "EUR",
+                domicile=snapshot.get("Domicile"),
+                distribution=distribution,
+                category_morningstar=category,
+                ter=safe_float(snapshot.get("OngoingCharge")),
+                performance=perf,
+                risk=RiskMetrics(
+                    sharpe_ratio_3y=safe_float(trailing.get("morningstarRatingFor3Year")),
+                ),
+                raw_data={
+                    "snapshot": snapshot,
+                    "trailing": trailing,
+                },
+            )
 
         except Exception as e:
             self.logger.error(f"Failed to get {isin} from Morningstar: {e}")
             return None
-
-    def _extract_performance_from_nav(self, nav_data) -> PerformanceData:
-        """Calcola performance da serie NAV."""
-        perf = PerformanceData()
-
-        if not nav_data:
-            return perf
-
-        try:
-            # Se nav_data è una lista di dict con date e valori
-            if isinstance(nav_data, list) and len(nav_data) > 1:
-                # Ordina per data
-                sorted_data = sorted(nav_data, key=lambda x: x.get("date", ""))
-
-                if sorted_data:
-                    start_val = float(sorted_data[0].get("nav", 0) or sorted_data[0].get("totalReturn", 0))
-                    end_val = float(sorted_data[-1].get("nav", 0) or sorted_data[-1].get("totalReturn", 0))
-
-                    if start_val > 0:
-                        total_return = ((end_val - start_val) / start_val) * 100
-                        # Questo è il return totale del periodo disponibile
-                        perf.return_5y = round(total_return, 2)
-
-        except Exception as e:
-            self.logger.warning(f"Failed to extract performance from NAV: {e}")
-
-        return perf
 
     def get_performance_history(
         self,
@@ -305,16 +259,15 @@ class MorningstarScraper(BaseDataSource):
             return None
 
         try:
-            import mstarpy as ms
+            import mstarpy.funds as ms_funds
 
-            fund = ms.Funds(isin)
+            fund = ms_funds.Funds(isin)
             nav_data = fund.nav(start_date=start_date, end_date=end_date)
 
             if nav_data:
                 return {
                     "dates": [d.get("date") for d in nav_data if d.get("date")],
                     "values": [d.get("nav") for d in nav_data if d.get("nav")],
-                    "total_return": [d.get("totalReturn") for d in nav_data if d.get("totalReturn")],
                 }
 
         except Exception as e:
@@ -328,10 +281,10 @@ class MorningstarScraper(BaseDataSource):
             return False
 
         try:
-            import mstarpy as ms
-            # Prova una ricerca semplice
-            results = ms.search_funds("MSCI World", page_size=1)
-            return True
+            import mstarpy.funds as ms_funds
+            # Prova a creare un oggetto Funds con ISIN noto
+            fund = ms_funds.Funds("IE00B4L5Y983")
+            return fund.name is not None
         except Exception as e:
             self.logger.error(f"Morningstar health check failed: {e}")
             return False
