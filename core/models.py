@@ -95,7 +95,7 @@ class SourceRecord:
         if not self.isin or len(self.isin) != 12:
             return False
         pattern = r'^[A-Z]{2}[A-Z0-9]{9}[0-9]$'
-        return bool(re.match(pattern, self.isin.upper()))
+        return bool(re.match(pattern, self.isin))
 
 
 @dataclass
