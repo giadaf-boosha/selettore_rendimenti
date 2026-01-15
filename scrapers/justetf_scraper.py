@@ -107,31 +107,34 @@ class JustETFScraper(BaseDataSource):
             except Exception:
                 pass
 
+        # ISIN è l'indice del DataFrame, non una colonna
+        isin = str(row.name) if hasattr(row, 'name') else ""
+
         return SourceRecord(
-            isin=str(row.get("isin", "")),
+            isin=isin,
             name=str(row.get("name", "")),
             source=self.name,
             instrument_type=InstrumentType.ETF,
             currency=str(row.get("currency", "EUR")),
             domicile=str(row.get("domicile_country", "")) if pd.notna(row.get("domicile_country")) else None,
-            distribution=self._map_distribution(row.get("use_of_profits")),
+            distribution=self._map_distribution(row.get("dividends")),  # "dividends" non "use_of_profits"
             category_morningstar=None,  # JustETF non fornisce categorie Morningstar
             category_assogestioni=None,
             ter=safe_float(row.get("ter")),
-            aum=safe_float(row.get("fund_size")),
+            aum=safe_float(row.get("size")),  # "size" non "fund_size"
             inception_date=inception,
             performance=PerformanceData(
-                ytd=safe_float(row.get("return_ytd")),
-                return_1y=safe_float(row.get("return_1y")),
-                return_3y=safe_float(row.get("return_3y_pa")),  # p.a. = annualizzato
-                return_5y=safe_float(row.get("return_5y_pa")),
-                return_10y=safe_float(row.get("return_10y_pa")),
+                ytd=safe_float(row.get("last_six_months")),  # YTD approssimato con 6 mesi
+                return_1y=safe_float(row.get("last_year")),
+                return_3y=safe_float(row.get("last_three_years")),
+                return_5y=safe_float(row.get("last_five_years")),
+                return_10y=None,  # JustETF non fornisce 10y direttamente
             ),
             risk=RiskMetrics(
-                volatility_1y=safe_float(row.get("volatility_1y")),
-                volatility_3y=safe_float(row.get("volatility_3y")),
-                volatility_5y=safe_float(row.get("volatility_5y")),
-                sharpe_ratio_3y=safe_float(row.get("sharpe_ratio_3y")),
+                volatility_1y=safe_float(row.get("last_year_volatility")),
+                volatility_3y=safe_float(row.get("last_three_years_volatility")),
+                volatility_5y=safe_float(row.get("last_five_years_volatility")),
+                sharpe_ratio_3y=safe_float(row.get("last_three_years_return_per_risk")),
                 max_drawdown=safe_float(row.get("max_drawdown")),
             ),
             raw_data=row.to_dict() if hasattr(row, 'to_dict') else {},
@@ -140,13 +143,13 @@ class JustETFScraper(BaseDataSource):
     def _get_perf_column(self, period: str) -> str:
         """Mappa periodo al nome colonna JustETF."""
         mapping = {
-            "ytd": "return_ytd",
-            "1y": "return_1y",
-            "3y": "return_3y_pa",
-            "5y": "return_5y_pa",
-            "10y": "return_10y_pa",
+            "ytd": "last_six_months",  # YTD approssimato
+            "1y": "last_year",
+            "3y": "last_three_years",
+            "5y": "last_five_years",
+            "10y": "last_five_years",  # Fallback a 5y
         }
-        return mapping.get(period, "return_3y_pa")
+        return mapping.get(period, "last_three_years")
 
     @retry_with_backoff(max_retries=3, base_delay=2.0)
     def search(
@@ -181,11 +184,11 @@ class JustETFScraper(BaseDataSource):
 
         # Filtro distribuzione
         if criteria.distribution_filter:
-            if "use_of_profits" in df.columns:
+            if "dividends" in df.columns:
                 if criteria.distribution_filter == DistributionPolicy.ACCUMULATING:
-                    mask &= df["use_of_profits"].str.lower().str.contains("accumulat", na=False)
+                    mask &= df["dividends"].str.lower().str.contains("accumulat", na=False)
                 elif criteria.distribution_filter == DistributionPolicy.DISTRIBUTING:
-                    mask &= df["use_of_profits"].str.lower().str.contains("distribut", na=False)
+                    mask &= df["dividends"].str.lower().str.contains("distribut", na=False)
 
         # Filtro performance minima (applicato qui per efficienza)
         if criteria.min_performance is not None:
@@ -223,13 +226,14 @@ class JustETFScraper(BaseDataSource):
         """Recupera singolo ETF per ISIN."""
         try:
             df = self._get_overview()
-            match = df[df["isin"] == isin.upper()]
+            isin_upper = isin.upper()
 
-            if match.empty:
+            # ISIN è l'indice del DataFrame
+            if isin_upper in df.index:
+                return self._row_to_record(df.loc[isin_upper])
+            else:
                 self.logger.debug(f"ISIN {isin} not found in JustETF")
                 return None
-
-            return self._row_to_record(match.iloc[0])
 
         except Exception as e:
             self.logger.error(f"Failed to get ISIN {isin}: {e}")
