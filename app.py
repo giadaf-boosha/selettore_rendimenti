@@ -221,7 +221,7 @@ with st.sidebar:
     cerca_clicked = st.button(
         "🔎 CERCA",
         type="primary",
-        use_container_width=True
+        key="search_button"
     )
 
     # Info fonti
@@ -416,7 +416,6 @@ elif st.session_state.search_completed and st.session_state.total_results > 0:
         st.dataframe(
             st.session_state.results_df,
             column_config=column_config,
-            use_container_width=True,
             hide_index=True,
             height=500
         )
@@ -439,7 +438,7 @@ elif st.session_state.search_completed and st.session_state.total_results > 0:
                 file_name=filename,
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 type="primary",
-                use_container_width=True
+                key="download_excel"
             )
 
             st.caption(f"File: {filename}")

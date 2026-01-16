@@ -52,13 +52,19 @@ class DataMerger:
 
         # Raggruppa per ISIN
         by_isin: Dict[str, List[SourceRecord]] = defaultdict(list)
+        invalid_isin_count = 0
 
         for record in records:
             normalized_isin = record.isin.strip().upper() if record.isin else ""
             if self._validate_isin(normalized_isin):
                 by_isin[normalized_isin].append(record)
             else:
-                logger.warning(f"Invalid ISIN skipped: {record.isin}")
+                invalid_isin_count += 1
+                # Log dettaglio solo a livello DEBUG per evitare spam
+                logger.debug(f"Invalid ISIN skipped: {record.isin}")
+
+        if invalid_isin_count > 0:
+            logger.info(f"Skipped {invalid_isin_count} records with invalid ISIN format")
 
         # Aggrega ogni gruppo
         aggregated = []

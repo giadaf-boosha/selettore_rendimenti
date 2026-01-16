@@ -6,6 +6,7 @@ Supporta categorie Morningstar e fornisce dati di performance.
 """
 from typing import List, Optional
 import logging
+import re
 
 from scrapers.base import BaseDataSource, ProgressCallback
 from core.models import (
@@ -20,6 +21,9 @@ from utils.retry import retry_with_backoff
 from utils.validators import safe_float
 
 logger = logging.getLogger(__name__)
+
+# Pattern per validazione ISIN
+ISIN_PATTERN = re.compile(r'^[A-Z]{2}[A-Z0-9]{9}[0-9]$')
 
 
 class MorningstarScraper(BaseDataSource):
@@ -52,6 +56,37 @@ class MorningstarScraper(BaseDataSource):
                 self.logger.error("mstarpy not installed. Run: pip install mstarpy")
                 self._mstarpy_available = False
         return self._mstarpy_available
+
+    def _validate_isin(self, isin: str) -> bool:
+        """Valida il formato ISIN."""
+        if not isin or len(isin) != 12:
+            return False
+        return bool(ISIN_PATTERN.match(isin.upper()))
+
+    def _extract_isin_from_meta(self, meta: dict) -> Optional[str]:
+        """
+        Estrae l'ISIN reale dai metadati Morningstar.
+
+        Morningstar può restituire securityID (identificatore interno)
+        invece dell'ISIN. Cerchiamo l'ISIN nei vari campi possibili.
+        """
+        # Campi dove potrebbe trovarsi l'ISIN
+        isin_fields = ["isin", "Isin", "ISIN", "isinCode", "IsinCode"]
+
+        for field in isin_fields:
+            if field in meta and meta[field]:
+                isin = str(meta[field]).strip().upper()
+                if self._validate_isin(isin):
+                    return isin
+
+        # Se non troviamo ISIN nei campi specifici, verifica se securityID è un ISIN valido
+        sec_id = meta.get("securityID", "")
+        if sec_id:
+            sec_id_upper = str(sec_id).strip().upper()
+            if self._validate_isin(sec_id_upper):
+                return sec_id_upper
+
+        return None
 
     def _determine_instrument_type(self, investment_type: str) -> InstrumentType:
         """Determina il tipo di strumento dalla stringa investment type."""
@@ -94,7 +129,14 @@ class MorningstarScraper(BaseDataSource):
         """
         Cerca strumenti usando mstarpy screener_universe.
 
-        Nota: mstarpy v8 usa screener_universe per ottenere liste di strumenti.
+        Nota importante: L'API Morningstar (mstarpy v8) restituisce solo
+        securityID interni nelle ricerche di massa, NON codici ISIN validi.
+        Per ottenere l'ISIN reale è necessario chiamare Funds(id).snapshot()
+        per ogni strumento, il che è troppo lento per ricerche di massa.
+
+        Questa implementazione filtra per ISIN validi e quindi potrebbe
+        restituire pochi o nessun risultato. Usare get_by_isin() per
+        lookup specifici con ISIN noti.
         """
         if not self._check_mstarpy():
             self._update_progress(progress_callback, 1.0, "mstarpy non disponibile")
@@ -136,22 +178,29 @@ class MorningstarScraper(BaseDataSource):
                     )
 
                     if results:
-                        # Per ogni risultato, prova a recuperare i dettagli
+                        # Per ogni risultato, estrai ISIN valido
+                        skipped_count = 0
                         for item in results:
                             meta = item.get("meta", {})
-                            sec_id = meta.get("securityID")
 
-                            if sec_id:
-                                # Per ora salviamo solo i metadati base
-                                # I dettagli verranno arricchiti via get_by_isin
+                            # Estrai ISIN reale (non securityID interno)
+                            isin = self._extract_isin_from_meta(meta)
+
+                            if isin:
+                                # Solo record con ISIN valido
                                 record = SourceRecord(
-                                    isin=sec_id,  # Potrebbe essere securityID, non ISIN
-                                    name="",
+                                    isin=isin,
+                                    name=meta.get("name", ""),
                                     source=self.name,
                                     instrument_type=self._determine_instrument_type(asset_type),
                                     raw_data=meta,
                                 )
                                 records.append(record)
+                            else:
+                                skipped_count += 1
+
+                        if skipped_count > 0:
+                            self.logger.debug(f"Skipped {skipped_count} records without valid ISIN")
 
                 except Exception as e:
                     self.logger.warning(f"Search failed for '{asset_type}': {e}")
