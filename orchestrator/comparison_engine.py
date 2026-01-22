@@ -347,13 +347,14 @@ class ComparisonEngine:
         category_lower = category.lower()
 
         for inst in universe:
-            if inst.category:
-                if inst.category.lower() == category_lower:
+            inst_category = inst.category_morningstar
+            if inst_category:
+                if inst_category.lower() == category_lower:
                     filtered.append(inst)
                 # Prova match parziale
-                elif category_lower in inst.category.lower():
+                elif category_lower in inst_category.lower():
                     filtered.append(inst)
-                elif inst.category.lower() in category_lower:
+                elif inst_category.lower() in category_lower:
                     filtered.append(inst)
 
         # Se nessun match, prova con mapping categorie
@@ -362,7 +363,8 @@ class ComparisonEngine:
             for asso_cat, ms_cats in CATEGORY_MAPPING.items():
                 if category in ms_cats:
                     for inst in universe:
-                        if inst.category and asso_cat.lower() in inst.category.lower():
+                        inst_category = inst.category_morningstar
+                        if inst_category and asso_cat.lower() in inst_category.lower():
                             filtered.append(inst)
 
         return filtered

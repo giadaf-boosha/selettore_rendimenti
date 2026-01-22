@@ -24,7 +24,7 @@ class AppConfig:
 
     # Generale
     app_name: str = "Selettore Rendimenti Fondi/ETF"
-    version: str = "3.0.0"
+    version: str = "3.1.0"
     debug: bool = os.getenv("DEBUG", "false").lower() == "true"
 
     # Logging
@@ -159,8 +159,9 @@ PERFORMANCE_PERIODS: Dict[str, str] = {
     "10 anni": "10y",
 }
 
-# Configurazione Universe Loader (v3.0)
-UNIVERSE_MAX_ISINS: int = 500
+# Configurazione Universe Loader (v3.1)
+# Increased to support larger files like giada1.xlsx with 3400+ instruments
+UNIVERSE_MAX_ISINS: int = 5000
 UNIVERSE_ALLOWED_EXTENSIONS: List[str] = [".xlsx", ".xls"]
 
 # Mapping categorie Assogestioni -> Morningstar per confronto

@@ -234,22 +234,118 @@ class UniverseInstrument:
     Strumento caricato dall'universo utente (file Excel).
 
     Rappresenta un fondo/strumento che l'utente ha nel proprio portafoglio
-    e che vuole confrontare con gli ETF di mercato.
+    con tutti i dati di performance, categoria e costi già inclusi.
+    Formato supportato: export da piattaforme finanziarie con performance
+    pre-calcolate (es. formato giada1.xlsx).
     """
     isin: str
     name: Optional[str] = None
-    category: Optional[str] = None
-    notes: Optional[str] = None
+
+    # Categorie
+    category_morningstar: Optional[str] = None
+    category_sfdr: Optional[str] = None
+
+    # Performance (in percentuale, es. 0.0248 = 2.48%)
+    perf_ytd: Optional[float] = None
+    perf_1m: Optional[float] = None
+    perf_3m: Optional[float] = None
+    perf_6m: Optional[float] = None
+    perf_1y: Optional[float] = None
+    perf_3y: Optional[float] = None
+    perf_5y: Optional[float] = None
+    perf_7y: Optional[float] = None
+    perf_9y: Optional[float] = None
+    perf_10y: Optional[float] = None
+    perf_custom: Optional[float] = None  # Perf. Personal.
+
+    # Costi
+    ter: Optional[float] = None  # Comm. Gest.+Distr.
+
+    # Rischio
+    var_3m: Optional[float] = None  # VaR Adeg. 3m
+    market_price_5y: Optional[float] = None  # PR Mkt 5a
+
+    # Metadati
     source_row: int = 0  # Riga nel file Excel originale
 
+    def get_performance_by_period(self, period: str) -> Optional[float]:
+        """
+        Restituisce la performance per il periodo specificato.
+
+        Args:
+            period: Codice periodo (1m, 3m, 6m, ytd, 1y, 3y, 5y, 7y, 9y, 10y)
+
+        Returns:
+            Performance in percentuale o None
+        """
+        mapping = {
+            "1m": self.perf_1m,
+            "3m": self.perf_3m,
+            "6m": self.perf_6m,
+            "ytd": self.perf_ytd,
+            "1y": self.perf_1y,
+            "3y": self.perf_3y,
+            "5y": self.perf_5y,
+            "7y": self.perf_7y,
+            "9y": self.perf_9y,
+            "10y": self.perf_10y,
+        }
+        return mapping.get(period)
+
     def to_dict(self) -> Dict[str, Any]:
-        """Converte in dizionario."""
+        """Converte in dizionario per export/display."""
         return {
             "ISIN": self.isin,
             "Nome": self.name or "",
-            "Categoria": self.category or "",
-            "Note": self.notes or "",
+            "Cat. Morningstar": self.category_morningstar or "",
+            "Cat. SFDR": self.category_sfdr or "",
+            "Perf. YTD": self._format_perf(self.perf_ytd),
+            "Perf. 1m": self._format_perf(self.perf_1m),
+            "Perf. 3m": self._format_perf(self.perf_3m),
+            "Perf. 6m": self._format_perf(self.perf_6m),
+            "Perf. 1a": self._format_perf(self.perf_1y),
+            "Perf. 3a": self._format_perf(self.perf_3y),
+            "Perf. 5a": self._format_perf(self.perf_5y),
+            "Perf. 7a": self._format_perf(self.perf_7y),
+            "Perf. 9a": self._format_perf(self.perf_9y),
+            "Perf. 10a": self._format_perf(self.perf_10y),
+            "TER": self._format_perf(self.ter),
+            "VaR 3m": self._format_perf(self.var_3m),
         }
+
+    def _format_perf(self, value: Optional[float]) -> Optional[str]:
+        """Formatta percentuale per display."""
+        if value is None:
+            return None
+        # Converti da decimale a percentuale (0.0248 -> 2.48%)
+        return f"{value * 100:.2f}%"
+
+    def to_aggregated(self) -> 'AggregatedInstrument':
+        """
+        Converte UniverseInstrument in AggregatedInstrument.
+
+        Utile per uniformare i dati dell'universo con quelli di mercato
+        per confronti e visualizzazioni.
+        """
+        return AggregatedInstrument(
+            isin=self.isin,
+            name=self.name or self.isin,
+            instrument_type=InstrumentType.FUND,
+            category_morningstar=self.category_morningstar,
+            # Performance (converti da decimale a percentuale)
+            perf_1m_eur=self.perf_1m * 100 if self.perf_1m is not None else None,
+            perf_3m_eur=self.perf_3m * 100 if self.perf_3m is not None else None,
+            perf_6m_eur=self.perf_6m * 100 if self.perf_6m is not None else None,
+            perf_ytd_eur=self.perf_ytd * 100 if self.perf_ytd is not None else None,
+            perf_1y_eur=self.perf_1y * 100 if self.perf_1y is not None else None,
+            perf_3y_eur=self.perf_3y * 100 if self.perf_3y is not None else None,
+            perf_5y_eur=self.perf_5y * 100 if self.perf_5y is not None else None,
+            perf_7y_eur=self.perf_7y * 100 if self.perf_7y is not None else None,
+            perf_9y_eur=self.perf_9y * 100 if self.perf_9y is not None else None,
+            perf_10y_eur=self.perf_10y * 100 if self.perf_10y is not None else None,
+            sources=["excel_upload"],
+            data_quality_score=100.0,  # Dati completi da file
+        )
 
 
 @dataclass
