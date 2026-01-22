@@ -45,18 +45,19 @@ class AppConfig:
             self.scrapers = {
                 "justetf": ScraperConfig(
                     enabled=True,
-                    rate_limit=float(os.getenv("JUSTETF_RATE_LIMIT", "1.0")),
-                    timeout=int(os.getenv("JUSTETF_TIMEOUT", "60")),
+                    rate_limit=float(os.getenv("JUSTETF_RATE_LIMIT", "2.0")),
+                    timeout=int(os.getenv("JUSTETF_TIMEOUT", "90")),
                 ),
                 "morningstar": ScraperConfig(
                     enabled=True,
-                    rate_limit=float(os.getenv("MORNINGSTAR_RATE_LIMIT", "0.5")),
-                    timeout=int(os.getenv("MORNINGSTAR_TIMEOUT", "30")),
+                    # Increased from 0.5 to 2.0 to avoid rate limiting
+                    rate_limit=float(os.getenv("MORNINGSTAR_RATE_LIMIT", "2.0")),
+                    timeout=int(os.getenv("MORNINGSTAR_TIMEOUT", "60")),
                 ),
                 "investiny": ScraperConfig(
                     enabled=True,
-                    rate_limit=float(os.getenv("INVESTINY_RATE_LIMIT", "1.0")),
-                    timeout=int(os.getenv("INVESTINY_TIMEOUT", "30")),
+                    rate_limit=float(os.getenv("INVESTINY_RATE_LIMIT", "2.0")),
+                    timeout=int(os.getenv("INVESTINY_TIMEOUT", "60")),
                 ),
             }
 

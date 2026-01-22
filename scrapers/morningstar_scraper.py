@@ -38,7 +38,8 @@ class MorningstarScraper(BaseDataSource):
     """
 
     def __init__(self):
-        super().__init__(name="morningstar", rate_limit=0.5)
+        # Rate limit increased to 2.0s to avoid triggering anti-bot measures
+        super().__init__(name="morningstar", rate_limit=2.0)
         self._mstarpy_available: Optional[bool] = None
 
     @property

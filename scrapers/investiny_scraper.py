@@ -40,7 +40,8 @@ class InvestinyScraper(BaseDataSource):
     """
 
     def __init__(self):
-        super().__init__(name="investiny", rate_limit=1.0)
+        # Rate limit increased to 2.0s to avoid triggering anti-bot measures
+        super().__init__(name="investiny", rate_limit=2.0)
         self._investiny_available: Optional[bool] = None
 
     @property

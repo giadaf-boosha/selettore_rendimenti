@@ -26,10 +26,11 @@ class RateLimiter:
         self._last_request: Dict[str, float] = defaultdict(float)
 
         # Rate limits per fonte (seconds between requests)
+        # Increased to 2.0s to avoid triggering anti-bot measures on cloud deployments
         self.limits = {
-            "justetf": 1.0,      # 1 req/sec
-            "morningstar": 0.5,  # 2 req/sec
-            "investiny": 1.0,    # 1 req/sec (conservative)
+            "justetf": 2.0,       # 0.5 req/sec (conservative)
+            "morningstar": 2.0,   # 0.5 req/sec (was 0.5, too aggressive)
+            "investiny": 2.0,     # 0.5 req/sec (conservative)
         }
 
     def wait(self, source: str) -> None:

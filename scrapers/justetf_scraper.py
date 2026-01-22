@@ -37,7 +37,8 @@ class JustETFScraper(BaseDataSource):
     """
 
     def __init__(self):
-        super().__init__(name="justetf", rate_limit=1.0)
+        # Rate limit increased to 2.0s to avoid triggering anti-bot measures
+        super().__init__(name="justetf", rate_limit=2.0)
         self._overview_cache: Optional[pd.DataFrame] = None
         self._cache_timestamp: Optional[float] = None
         self._cache_ttl: int = 3600  # 1 ora

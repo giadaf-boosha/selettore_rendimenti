@@ -14,6 +14,10 @@ Autore: Boosha AI
 Cliente: Massimo Zaffanella - Consulente Finanziario
 Versione: 3.0.0
 """
+# IMPORTANT: Import http_config FIRST to patch requests library
+# This adds realistic User-Agent headers to avoid bot detection
+import utils.http_config  # noqa: F401 - patches requests on import
+
 import streamlit as st
 import pandas as pd
 from datetime import datetime
