@@ -24,7 +24,7 @@ class AppConfig:
 
     # Generale
     app_name: str = "Selettore Rendimenti Fondi/ETF"
-    version: str = "3.1.0"
+    version: str = "4.0.0"
     debug: bool = os.getenv("DEBUG", "false").lower() == "true"
 
     # Logging

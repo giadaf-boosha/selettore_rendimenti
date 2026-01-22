@@ -1,19 +1,19 @@
 """
-Selettore Automatico Rendimenti Fondi/ETF v3.1
+Selettore Automatico Rendimenti Fondi/ETF v4.0
 
 Web application Streamlit per l'analisi e il ranking di fondi comuni
 a partire da file Excel con dati di performance completi.
 
-Funzionalita' v3.1:
+Funzionalita' v4.0:
 - Upload Universo Fondi da Excel (formato completo con performance)
-- Esplorazione e filtering per categoria, performance, TER
+- Selezione MULTIPLA categorie Morningstar
+- Confronto con ETF benchmark (chi batte l'ETF?)
 - Ranking per periodo di performance
-- Confronto tra fondi della stessa categoria
 - Export risultati in Excel
 
 Autore: Boosha AI
 Cliente: Massimo Zaffanella - Consulente Finanziario
-Versione: 3.1.0
+Versione: 4.0.0
 """
 # IMPORTANT: Import http_config FIRST to patch requests library
 # This adds realistic User-Agent headers to avoid bot detection
@@ -39,9 +39,10 @@ from core.models import UniverseInstrument
 from core.universe_loader import (
     UniverseLoader,
     group_by_category,
-    filter_by_performance,
     rank_by_performance,
 )
+from core.etf_benchmark import get_etf_benchmark
+from core.comparison_calculator import compare_universe_vs_etf
 from utils.logger import setup_logging
 
 # Setup logging
@@ -54,7 +55,7 @@ logger = logging.getLogger(__name__)
 # ============================================================================
 
 st.set_page_config(
-    page_title="Selettore Rendimenti Fondi/ETF v3.1",
+    page_title="Selettore Rendimenti Fondi/ETF v4.0",
     page_icon="📊",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -79,6 +80,9 @@ def init_session_state():
         # Stato filtri e risultati
         'filtered_instruments': [],
         'filter_applied': False,
+        # Stato confronto ETF
+        'comparison_report': None,
+        'comparison_done': False,
         # Modalita' attiva
         'active_mode': 'esplora',
     }
@@ -114,6 +118,8 @@ def load_universe(uploaded_file):
         st.session_state.universe_filename = uploaded_file.name
         st.session_state.filtered_instruments = result.instruments
         st.session_state.filter_applied = False
+        st.session_state.comparison_report = None
+        st.session_state.comparison_done = False
 
         logger.info(f"Universe loaded: {result.valid_count} instruments")
         return result
@@ -225,6 +231,52 @@ def universe_to_excel(instruments: List[UniverseInstrument]) -> bytes:
     return output.getvalue()
 
 
+def comparison_to_excel(report) -> bytes:
+    """Esporta risultati confronto in formato Excel."""
+    data = []
+
+    # Prima riga: ETF benchmark
+    etf = report.etf_benchmark
+    etf_perf = report.etf_performance
+    data.append({
+        "Nome": f"[BENCHMARK] {etf.name or etf.isin}",
+        "ISIN": etf.isin,
+        "Categoria": etf.category_morningstar or "",
+        f"Perf. {report.period_label}": f"{etf_perf * 100:.2f}%" if etf_perf else "N/A",
+        "Delta vs ETF": "BENCHMARK",
+        "Status": "🎯 BENCHMARK"
+    })
+
+    # Risultati ordinati
+    for r in report.get_sorted_results():
+        row = {
+            "Nome": r.instrument.name or r.instrument.isin,
+            "ISIN": r.instrument.isin,
+            "Categoria": r.instrument.category_morningstar or "",
+            f"Perf. {report.period_label}": f"{r.fund_performance * 100:.2f}%" if r.fund_performance else "N/A",
+            "Delta vs ETF": f"{r.delta * 100:+.2f}%" if r.delta else "N/A",
+            "Status": r.status_emoji
+        }
+        data.append(row)
+
+    df = pd.DataFrame(data)
+
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df.to_excel(writer, sheet_name='Confronto ETF', index=False)
+
+        # Auto-adjust column widths
+        worksheet = writer.sheets['Confronto ETF']
+        for idx, col in enumerate(df.columns):
+            max_length = max(
+                df[col].astype(str).str.len().max(),
+                len(col)
+            ) + 2
+            worksheet.column_dimensions[chr(65 + idx)].width = min(max_length, 50)
+
+    return output.getvalue()
+
+
 def get_unique_categories(instruments: List[UniverseInstrument]) -> List[str]:
     """Estrae lista di categorie uniche dagli strumenti."""
     categories = set()
@@ -245,20 +297,30 @@ def get_unique_sfdr_categories(instruments: List[UniverseInstrument]) -> List[st
 
 def apply_filters(
     instruments: List[UniverseInstrument],
-    category_filter: Optional[str],
-    sfdr_filter: Optional[str],
-    min_perf: Optional[float],
-    perf_period: str,
-    max_ter: Optional[float]
+    selected_categories: List[str],
+    sfdr_filter: Optional[str]
 ) -> List[UniverseInstrument]:
-    """Applica filtri alla lista di strumenti."""
+    """
+    Applica filtri alla lista di strumenti.
+
+    Args:
+        instruments: Lista strumenti da filtrare
+        selected_categories: Lista categorie Morningstar selezionate (OR logic)
+        sfdr_filter: Filtro categoria SFDR (singola selezione)
+
+    Returns:
+        Lista strumenti filtrati
+    """
     filtered = instruments
 
-    # Filtro categoria Morningstar
-    if category_filter and category_filter != "Tutte":
+    # Filtro categorie Morningstar (multiselect con logica OR)
+    if selected_categories:
         filtered = [
             inst for inst in filtered
-            if inst.category_morningstar and category_filter.lower() in inst.category_morningstar.lower()
+            if inst.category_morningstar and any(
+                cat.lower() in inst.category_morningstar.lower()
+                for cat in selected_categories
+            )
         ]
 
     # Filtro categoria SFDR
@@ -266,19 +328,6 @@ def apply_filters(
         filtered = [
             inst for inst in filtered
             if inst.category_sfdr and sfdr_filter.lower() in inst.category_sfdr.lower()
-        ]
-
-    # Filtro performance minima
-    if min_perf is not None:
-        min_perf_decimal = min_perf / 100  # Converti da percentuale a decimale
-        filtered = filter_by_performance(filtered, perf_period, min_value=min_perf_decimal)
-
-    # Filtro TER massimo
-    if max_ter is not None:
-        max_ter_decimal = max_ter / 100
-        filtered = [
-            inst for inst in filtered
-            if inst.ter is None or inst.ter <= max_ter_decimal
         ]
 
     return filtered
@@ -289,7 +338,7 @@ def apply_filters(
 # ============================================================================
 
 with st.sidebar:
-    st.title("📊 Selettore v3.1")
+    st.title("📊 Selettore v4.0")
     st.divider()
 
     # =====================================
@@ -300,7 +349,7 @@ with st.sidebar:
     uploaded_file = st.file_uploader(
         "File Excel con dati completi",
         type=["xlsx", "xls"],
-        help="File Excel con colonne: Nome, ISIN, Performance, Categoria Morningstar, TER, etc."
+        help="File Excel con colonne: Nome, ISIN, Performance, Categoria Morningstar, etc."
     )
 
     if uploaded_file is not None:
@@ -329,11 +378,8 @@ with st.sidebar:
     # =====================================
     # FILTRI (solo se universo caricato)
     # =====================================
-    category_filter = None
+    selected_categories = []
     sfdr_filter = None
-    perf_period = "3y"
-    min_perf = None
-    max_ter = None
     sort_by = "3y"
     sort_ascending = False
     top_n = None
@@ -345,13 +391,13 @@ with st.sidebar:
         available_categories = get_unique_categories(st.session_state.universe_instruments)
         available_sfdr = get_unique_sfdr_categories(st.session_state.universe_instruments)
 
-        # Filtro categoria Morningstar
+        # Filtro categorie Morningstar (MULTISELECT)
         if available_categories:
-            category_filter = st.selectbox(
-                "Categoria Morningstar",
-                options=["Tutte"] + available_categories,
-                index=0,
-                help="Filtra per categoria Morningstar"
+            selected_categories = st.multiselect(
+                "Categorie Morningstar",
+                options=available_categories,
+                default=[],
+                help="Seleziona una o piu' categorie (lascia vuoto per mostrare tutte)"
             )
 
         # Filtro SFDR
@@ -365,54 +411,14 @@ with st.sidebar:
 
         st.divider()
 
-        # Performance
-        st.subheader("📈 Performance")
-
-        col1, col2 = st.columns(2)
-
-        with col1:
-            perf_period_label = st.selectbox(
-                "Periodo",
-                options=list(PERFORMANCE_PERIODS.keys()),
-                index=4,  # default: 1 anno
-                help="Periodo per filtro e ordinamento"
-            )
-            perf_period = PERFORMANCE_PERIODS[perf_period_label]
-
-        with col2:
-            min_perf = st.number_input(
-                "Perf. min %",
-                min_value=-100.0,
-                max_value=500.0,
-                value=0.0,
-                step=5.0,
-                help="Performance minima (in percentuale)"
-            )
-            if min_perf == 0.0:
-                min_perf = None
-
-        # TER massimo
-        max_ter = st.number_input(
-            "TER max %",
-            min_value=0.0,
-            max_value=10.0,
-            value=3.0,
-            step=0.1,
-            help="Commissione massima annua"
-        )
-        if max_ter == 3.0:
-            max_ter = None
-
-        st.divider()
-
         # Ordinamento
         st.subheader("📊 Ordinamento")
 
         sort_by_label = st.selectbox(
-            "Ordina per",
+            "Ordina per periodo",
             options=list(PERFORMANCE_PERIODS.keys()),
             index=4,  # default: 1 anno
-            help="Periodo per ordinamento"
+            help="Periodo per ordinamento risultati"
         )
         sort_by = PERFORMANCE_PERIODS[sort_by_label]
 
@@ -440,11 +446,8 @@ with st.sidebar:
             # Applica filtri
             filtered = apply_filters(
                 st.session_state.universe_instruments,
-                category_filter if category_filter != "Tutte" else None,
-                sfdr_filter if sfdr_filter != "Tutte" else None,
-                min_perf,
-                perf_period,
-                max_ter
+                selected_categories,
+                sfdr_filter if sfdr_filter != "Tutte" else None
             )
 
             # Ordina
@@ -452,15 +455,19 @@ with st.sidebar:
 
             st.session_state.filtered_instruments = filtered
             st.session_state.filter_applied = True
+            # Reset confronto quando cambiano i filtri
+            st.session_state.comparison_report = None
+            st.session_state.comparison_done = False
 
     # Info
     with st.expander("ℹ️ Informazioni"):
         st.markdown("""
         **Come usare:**
         1. Carica il file Excel con i dati dei fondi
-        2. Applica filtri per categoria, performance, TER
-        3. Visualizza i risultati ordinati
-        4. Esporta in Excel
+        2. Seleziona una o piu' categorie Morningstar
+        3. Inserisci l'ISIN di un ETF per confrontare
+        4. Visualizza chi batte l'ETF
+        5. Esporta i risultati in Excel
 
         **Formato file supportato:**
         - Nome, ISIN
@@ -477,7 +484,7 @@ with st.sidebar:
 # ============================================================================
 
 st.title("📊 Selettore Rendimenti Fondi/ETF")
-st.caption(f"v{config.version} | Analisi e ranking fondi da file Excel")
+st.caption(f"v{config.version} | Analisi e confronto fondi vs ETF")
 
 
 # ============================================================================
@@ -550,48 +557,213 @@ else:
             value=len(cats)
         )
 
+    # =========================================================================
+    # SEZIONE CONFRONTO ETF
+    # =========================================================================
     st.divider()
+    st.subheader("🎯 Confronta con ETF Benchmark")
 
-    # Tabella risultati
-    st.subheader("📋 Fondi")
+    st.markdown(
+        "Inserisci l'ISIN di un ETF per vedere quali fondi lo battono "
+        "nel periodo selezionato."
+    )
 
-    df = universe_to_dataframe(displayed_instruments)
+    col1, col2, col3 = st.columns([2, 1, 1])
 
-    if not df.empty:
-        st.dataframe(
-            df,
-            hide_index=True,
-            height=500,
+    with col1:
+        etf_isin_input = st.text_input(
+            "ISIN ETF Benchmark",
+            placeholder="Es: IE00B5BMR087",
+            help="Inserisci l'ISIN dell'ETF con cui confrontare i fondi"
+        )
+
+    with col2:
+        comparison_period_label = st.selectbox(
+            "Periodo Confronto",
+            options=list(PERFORMANCE_PERIODS.keys()),
+            index=5,  # default: 3 anni
+            key="comparison_period",
+            help="Periodo per il calcolo del delta"
+        )
+        comparison_period = PERFORMANCE_PERIODS[comparison_period_label]
+
+    with col3:
+        st.write("")  # Spacer
+        st.write("")  # Spacer
+        compare_button = st.button(
+            "🔎 CONFRONTA",
+            type="primary",
             use_container_width=True
         )
-    else:
-        st.warning("Nessun fondo corrisponde ai filtri selezionati.")
 
-    st.divider()
+    if compare_button:
+        if not etf_isin_input:
+            st.warning("⚠️ Inserisci l'ISIN dell'ETF benchmark")
+        else:
+            # Recupera ETF
+            with st.spinner("🔍 Ricerca dati ETF..."):
+                # Cerca nell'universo completo (non solo i filtrati)
+                etf = get_etf_benchmark(
+                    etf_isin_input,
+                    st.session_state.universe_instruments
+                )
 
-    # Download
-    if displayed_instruments:
-        col1, col2, col3 = st.columns([1, 2, 1])
+            if etf is None:
+                st.error(f"❌ ETF con ISIN '{etf_isin_input}' non trovato")
+            else:
+                # Esegui confronto sui fondi filtrati
+                report = compare_universe_vs_etf(
+                    displayed_instruments,
+                    etf,
+                    comparison_period,
+                    comparison_period_label
+                )
+                st.session_state.comparison_report = report
+                st.session_state.comparison_done = True
+
+    # Mostra risultati confronto se disponibili
+    if st.session_state.comparison_done and st.session_state.comparison_report:
+        report = st.session_state.comparison_report
+
+        st.divider()
+        st.subheader("📋 Risultati Confronto")
+
+        # Info ETF Benchmark
+        etf = report.etf_benchmark
+        etf_perf = report.etf_performance
+
+        st.markdown(f"""
+        **🎯 Benchmark:** {etf.name or etf.isin} ({etf.isin})
+        **📊 Periodo:** {report.period_label}
+        **📈 Performance ETF:** {f"{etf_perf * 100:.2f}%" if etf_perf else "N/A"}
+        """)
+
+        # Metriche confronto
+        col1, col2, col3, col4 = st.columns(4)
+
+        with col1:
+            if etf_perf:
+                st.metric("Perf. ETF", f"{etf_perf * 100:.2f}%")
+            else:
+                st.metric("Perf. ETF", "N/A")
 
         with col2:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M")
-            filename = f"fondi_selezionati_{timestamp}.xlsx"
-
-            excel_data = universe_to_excel(displayed_instruments)
-
-            st.download_button(
-                label="📥 SCARICA EXCEL",
-                data=excel_data,
-                file_name=filename,
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                type="primary",
-                key="download_excel"
+            st.metric(
+                "✅ Battono ETF",
+                report.funds_beating_etf,
+                delta=f"{report.beat_percentage:.0f}%" if report.total_funds > 0 else None
             )
 
-            st.caption(f"File: {filename}")
+        with col3:
+            st.metric(
+                "❌ Non Battono",
+                report.funds_not_beating_etf
+            )
+
+        with col4:
+            if report.avg_delta:
+                st.metric("Media Delta", f"{report.avg_delta * 100:+.2f}%")
+            else:
+                st.metric("Media Delta", "N/A")
+
+        st.divider()
+
+        # Tabella risultati
+        comparison_data = []
+
+        # Prima riga: ETF benchmark
+        comparison_data.append({
+            "Nome": f"🎯 {etf.name or etf.isin}",
+            "ISIN": etf.isin,
+            "Categoria": etf.category_morningstar or "-",
+            f"Perf. {report.period_label}": f"{etf_perf * 100:.2f}%" if etf_perf else "N/A",
+            "Delta vs ETF": "BENCHMARK",
+            "Status": "🎯 BENCHMARK"
+        })
+
+        # Risultati ordinati
+        for r in report.get_sorted_results():
+            row = {
+                "Nome": r.instrument.name or r.instrument.isin,
+                "ISIN": r.instrument.isin,
+                "Categoria": r.instrument.category_morningstar or "",
+                f"Perf. {report.period_label}": f"{r.fund_performance * 100:.2f}%" if r.fund_performance else "N/A",
+                "Delta vs ETF": f"{r.delta * 100:+.2f}%" if r.delta else "N/A",
+                "Status": r.status_emoji
+            }
+            comparison_data.append(row)
+
+        df_comparison = pd.DataFrame(comparison_data)
+
+        # Mostra tabella con styling
+        st.dataframe(
+            df_comparison,
+            hide_index=True,
+            use_container_width=True,
+            height=500
+        )
+
+        # Download risultati confronto
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+            filename_comparison = f"confronto_etf_{etf.isin}_{timestamp}.xlsx"
+
+            excel_data_comparison = comparison_to_excel(report)
+
+            st.download_button(
+                label="📥 SCARICA RISULTATI CONFRONTO",
+                data=excel_data_comparison,
+                file_name=filename_comparison,
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                type="primary",
+                key="download_comparison"
+            )
+
+    # =========================================================================
+    # TABELLA FONDI (se non in modalita' confronto)
+    # =========================================================================
+    if not st.session_state.comparison_done:
+        st.divider()
+        st.subheader("📋 Fondi")
+
+        df = universe_to_dataframe(displayed_instruments)
+
+        if not df.empty:
+            st.dataframe(
+                df,
+                hide_index=True,
+                height=500,
+                use_container_width=True
+            )
+        else:
+            st.warning("Nessun fondo corrisponde ai filtri selezionati.")
+
+        st.divider()
+
+        # Download
+        if displayed_instruments:
+            col1, col2, col3 = st.columns([1, 2, 1])
+
+            with col2:
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+                filename = f"fondi_selezionati_{timestamp}.xlsx"
+
+                excel_data = universe_to_excel(displayed_instruments)
+
+                st.download_button(
+                    label="📥 SCARICA EXCEL",
+                    data=excel_data,
+                    file_name=filename,
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    type="primary",
+                    key="download_excel"
+                )
+
+                st.caption(f"File: {filename}")
 
     # Statistiche per categoria
-    if displayed_instruments:
+    if displayed_instruments and not st.session_state.comparison_done:
         st.divider()
         st.subheader("📊 Statistiche per Categoria")
 
