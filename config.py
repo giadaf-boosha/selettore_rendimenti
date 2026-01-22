@@ -161,6 +161,7 @@ PERFORMANCE_PERIODS: Dict[str, str] = {
 
 # Configurazione Universe Loader (v3.1)
 # Increased to support larger files like giada1.xlsx with 3400+ instruments
+# NOTE: Previous limit was 500, now 5000 to support full universe files
 UNIVERSE_MAX_ISINS: int = 5000
 UNIVERSE_ALLOWED_EXTENSIONS: List[str] = [".xlsx", ".xls"]
 
