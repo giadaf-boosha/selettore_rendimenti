@@ -1,5 +1,5 @@
 # DOCUMENTO DI SPECIFICHE
-## Selettore Automatico Rendimenti Fondi/ETF - v3.0
+## Selettore Automatico Rendimenti Fondi/ETF - v4.0
 
 ---
 
@@ -8,7 +8,7 @@
 | **Cliente** | Massimo Zaffanella - Consulente Finanziario |
 | **Progetto** | AI Acceleration Program - Automazione Back-Office |
 | **Data** | 22 gennaio 2026 |
-| **Versione** | 3.0 |
+| **Versione** | 4.0 |
 | **Deployment** | Streamlit Cloud (https://streamlit.io/) |
 
 ---
@@ -17,400 +17,361 @@
 
 ### 1.1 Situazione Attuale
 
-Massimo Zaffanella, consulente finanziario, dedica una parte significativa del proprio tempo alla ricerca e al confronto di strumenti finanziari (fondi comuni e ETF) su diverse piattaforme online. Questa attività, sebbene essenziale per fornire consulenza di qualità ai clienti, risulta ripetitiva e time-consuming.
+Massimo Zaffanella, consulente finanziario, ha a disposizione un **universo di circa 3000+ fondi** che puo' proporre ai propri clienti. La sfida principale e' identificare rapidamente quali fondi hanno performance migliori rispetto agli ETF equivalenti di mercato.
 
-Attualmente il processo prevede:
+**Problema chiave (dal transcript):**
+> "Me lo fa su tutti i fondi. Ci sono 12.000 fondi. A me sapere che 5.000 degli altri fondi che io non posso fare hanno fatto meglio, non interessa. Interessa farlo sull'universo di investimento che io ho a disposizione."
 
-- Accesso manuale a 5-6 piattaforme diverse (JustETF, Morningstar, Quantalys, Investing.com, FondiDoc)
-- Ricerca per categoria, settore o tema di investimento
-- Estrazione manuale delle performance su diversi orizzonti temporali
-- Consolidamento dei dati in un file Excel per il confronto
+La versione 3.1 ha implementato il caricamento dell'universo da Excel, ma manca la funzionalita' principale: **il confronto diretto con un ETF benchmark per identificare chi lo batte**.
 
-La versione 1.0 del sistema ha automatizzato la ricerca multi-piattaforma, ma manca una funzionalità chiave: **la possibilità di confrontare i fondi del proprio portafoglio ("Universo Fondi") con gli ETF di mercato**.
+### 1.2 Obiettivo del Progetto (v4.0)
 
-### 1.2 Obiettivo del Progetto (v3.0)
+Estendere l'applicazione per permettere a Massimo di:
 
-Estendere la web application esistente per permettere a Massimo di:
-
-1. **Caricare il proprio "Universo Fondi"** tramite file Excel (elenco di ISIN dei fondi a sua disposizione)
-2. **Confrontare i fondi dell'universo con gli ETF corrispondenti** per categoria Morningstar o Assogestioni
-3. **Selezionare un ETF specifico** e confrontarlo con i fondi del proprio universo
-4. **Analizzare le performance su orizzonti temporali estesi**: 1-3-6-12 mesi, YTD, 3-5-7-9-10 anni
+1. **Caricare il proprio "Universo Fondi"** tramite file Excel (gia' implementato in v3.1)
+2. **Selezionare MULTIPLE categorie Morningstar** per filtrare l'universo
+3. **Inserire l'ISIN di un ETF specifico** e confrontarlo con i fondi dell'universo
+4. **Visualizzare chi batte l'ETF** con evidenziazione chiara dei risultati
+5. **Esportare i risultati** in formato Excel
 
 ### 1.3 Principio Guida
 
-> "È fondamentale che io possa, ogni volta inserire il mio Universo, perché è molto più semplice inserirlo di volta in volta tramite un file Excel, rispetto a utilizzare database esterni."
-> — Massimo Zaffanella
+> "Io vado a cercare l'ISIN dell'ETF e gli dico 'Confrontamene con quelli qua, chi l'ha battuto?' e lui mi restituisce un nuovo file o una nuova tabella con evidenziato chi sono quelli che l'hanno battuto."
+> — Massimo Zaffanella (Transcript min. 45)
 
 ---
 
 ## 2. Requisiti Funzionali
 
-### 2.1 Funzionalità Esistenti (v1.0 - Mantenute)
+### 2.1 Funzionalita' Esistenti (v3.1 - Mantenute)
 
-#### RF-01: Ricerca Multi-Piattaforma
-Il sistema interroga automaticamente:
-- **JustETF.com** - ETF quotati in Europa
-- **Morningstar.com** - ETF e Fondi globali
-- **Investing.com** - Dati fondi (via investiny)
+#### RF-01: Upload Universo Fondi
+- Caricamento file Excel con dati completi (Nome, ISIN, Performance, Categorie, TER)
+- Validazione ISIN
+- Supporto fino a 5000 strumenti
+- Parsing automatico colonne con mapping flessibile
 
-#### RF-02: Filtri di Ricerca
-- Categoria Morningstar / Assogestioni
-- Valuta (EUR, USD, GBP, CHF)
-- Tipo strumento (ETF / Fondi)
-- Politica distribuzione (Accumulo / Distribuzione)
-- Performance minima per periodo
-
-#### RF-03: Output Excel
-File Excel formattato con performance, categorie, metriche di rischio.
+#### RF-02: Visualizzazione Dati
+- Tabella interattiva con tutti i dati caricati
+- Formattazione performance in percentuale
+- Export Excel dei risultati
 
 ---
 
-### 2.2 Nuove Funzionalità (v3.0)
+### 2.2 Nuove Funzionalita' (v4.0)
 
-#### RF-04: Upload Universo Fondi
+#### RF-03: Selezione Multipla Categorie Morningstar [NUOVO]
+
+**Requisito dal transcript (min. 48):**
+> "Morningstar e' molto specialistico, quindi lui l'azionario americano lo divide in tanti sottosettori... Io vorrei poter selezionare piu' di uno, quindi dammi il large value, growth e blend tutti e tre."
 
 | Elemento | Descrizione |
 |----------|-------------|
-| **Input** | File Excel (.xlsx, .xls) con colonna ISIN |
-| **Formato atteso** | Colonna "ISIN" obbligatoria, altre colonne opzionali (Nome, Note, ecc.) |
-| **Validazione** | Verifica formato ISIN (12 caratteri, pattern AA + 9 alfanum + 1 digit) |
-| **Persistenza** | Nessun database - il file viene caricato ad ogni sessione |
-| **Limite** | Max 500 ISIN per file (per performance) |
+| **Componente UI** | `st.multiselect` invece di `st.selectbox` |
+| **Comportamento** | Selezione di 1 o piu' categorie contemporaneamente |
+| **Logica filtro** | OR tra le categorie selezionate (un fondo e' incluso se appartiene ad ALMENO UNA delle categorie selezionate) |
+| **Default** | Nessuna categoria selezionata = mostra tutti i fondi |
 
-**Flusso Upload:**
-1. L'utente clicca su "Carica Universo Fondi"
-2. Seleziona file Excel dal proprio computer
-3. Il sistema valida gli ISIN e mostra anteprima
-4. L'utente conferma il caricamento
-5. L'universo è disponibile per i confronti
+**Esempio d'uso:**
+- Utente seleziona: "Azionari USA Large Cap Blend", "Azionari USA Large Cap Growth", "Azionari USA Large Cap Value"
+- Sistema mostra tutti i fondi che appartengono a una qualsiasi di queste 3 categorie
 
-#### RF-05: Modalità di Confronto
+#### RF-04: Confronto con ETF Specifico [NUOVO - FUNZIONALITA' PRINCIPALE]
 
-Il sistema deve supportare **due modalità operative**:
+**Requisito dal transcript (min. 45):**
+> "Bisognerebbe aggiungere proprio una caratteristica del tipo confrontalo con quell'ETF. Io vado a cercare l'ISIN dell'ETF, che e' la cosa piu' semplice. Vado a cercare l'ISIN dell'ETF e gli dico 'Confrontamene con quelli qua, chi l'ha battuto?'"
 
-| Modalità | Descrizione | Casi d'uso |
-|----------|-------------|------------|
-| **A. Universo vs ETF per Categoria** | Seleziona categoria → Confronta fondi universo con ETF della stessa categoria | "Quali dei miei fondi azionari USA hanno fatto meglio dell'ETF equivalente?" |
-| **B. ETF vs Universo** | Seleziona un ETF specifico → Confronta con fondi dell'universo di categorie simili | "Come si posiziona questo ETF rispetto ai fondi che ho a disposizione?" |
-
-##### Modalità A: Universo vs ETF per Categoria
-
-**Flusso:**
-1. L'utente carica il proprio Universo Fondi (file Excel)
-2. Seleziona una categoria (Morningstar o Assogestioni)
-3. Clicca "CONFRONTA"
-4. Il sistema:
-   - Filtra i fondi dell'universo per la categoria selezionata
-   - Cerca gli ETF corrispondenti da JustETF/Morningstar
-   - Mostra tabella comparativa con performance side-by-side
-5. Output: Excel con confronto fondi vs ETF
-
-##### Modalità B: ETF vs Universo
-
-**Flusso:**
-1. L'utente carica il proprio Universo Fondi
-2. L'utente inserisce l'ISIN di un ETF o lo cerca per nome
-3. Il sistema recupera i dati dell'ETF dalle fonti
-4. Mostra l'ETF affiancato ai fondi dell'universo (stessa categoria o tutte)
-5. Output: Excel con confronto ETF selezionato vs fondi universo
-
-#### RF-06: Periodi di Performance Estesi
-
-Il sistema deve supportare i seguenti periodi di confronto:
-
-| Periodo | Chiave Interna | Note |
-|---------|----------------|------|
-| 1 mese | `1m` | Nuovo |
-| 3 mesi | `3m` | Nuovo |
-| 6 mesi | `6m` | Nuovo |
-| 12 mesi / 1 anno | `1y` | Esistente |
-| YTD | `ytd` | Esistente |
-| 3 anni | `3y` | Esistente |
-| 5 anni | `5y` | Esistente |
-| 7 anni | `7y` | Esistente |
-| 9 anni | `9y` | Nuovo |
-| 10 anni | `10y` | Esistente |
-
-#### RF-07: Tabella Comparativa
-
-La tabella di confronto deve mostrare:
-
-| Colonna | Descrizione |
-|---------|-------------|
-| **Nome** | Nome strumento |
-| **ISIN** | Codice identificativo |
-| **Tipo** | ETF / Fondo |
-| **Categoria** | Morningstar / Assogestioni |
-| **Origine** | "Universo" o "Mercato" |
-| **Perf. 1m** | Performance 1 mese |
-| **Perf. 3m** | Performance 3 mesi |
-| **Perf. 6m** | Performance 6 mesi |
-| **Perf. 1a** | Performance 1 anno |
-| **Perf. YTD** | Performance Year-To-Date |
-| **Perf. 3a** | Performance 3 anni |
-| **Perf. 5a** | Performance 5 anni |
-| **Perf. 7a** | Performance 7 anni |
-| **Perf. 9a** | Performance 9 anni |
-| **Perf. 10a** | Performance 10 anni |
-| **Differenza** | Delta performance vs benchmark (ETF) |
-
-#### RF-08: Indicatori Visivi di Confronto
-
-| Indicatore | Condizione | Rappresentazione |
-|------------|------------|------------------|
-| **Outperformance** | Fondo batte ETF | Verde / Freccia su |
-| **Underperformance** | Fondo sotto ETF | Rosso / Freccia giù |
-| **Parità** | Differenza < 0.5% | Grigio / Trattino |
-
----
-
-### 2.3 Interfaccia Utente (v3.0)
-
-#### RF-09: Layout Aggiornato
+**Flusso operativo:**
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│ 📊 Selettore Rendimenti Fondi/ETF                               │
+│ 1. CARICA UNIVERSO                                              │
+│    └─> File Excel con 3000+ fondi                               │
+├─────────────────────────────────────────────────────────────────┤
+│ 2. FILTRA PER CATEGORIA (opzionale)                             │
+│    └─> Seleziona 1+ categorie Morningstar                       │
+├─────────────────────────────────────────────────────────────────┤
+│ 3. INSERISCI ISIN ETF BENCHMARK                                 │
+│    └─> Es: IE00B5BMR087 (iShares Core S&P 500)                  │
+├─────────────────────────────────────────────────────────────────┤
+│ 4. SELEZIONA PERIODO DI CONFRONTO                               │
+│    └─> Es: 3 anni                                               │
+├─────────────────────────────────────────────────────────────────┤
+│ 5. CLICCA "CONFRONTA"                                           │
+│    └─> Sistema cerca performance ETF su fonti esterne           │
+├─────────────────────────────────────────────────────────────────┤
+│ 6. VISUALIZZA RISULTATI                                         │
+│    └─> Tabella con:                                             │
+│        - ETF benchmark (in evidenza)                            │
+│        - Fondi che BATTONO l'ETF (verde, in alto)               │
+│        - Fondi che NON battono l'ETF (rosso, in basso)          │
+│        - Delta performance per ogni fondo                       │
+├─────────────────────────────────────────────────────────────────┤
+│ 7. ESPORTA EXCEL                                                │
+│    └─> File con risultati confronto                             │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Componenti UI:**
+
+| Componente | Tipo Streamlit | Descrizione |
+|------------|----------------|-------------|
+| Input ISIN ETF | `st.text_input` | Campo per inserire ISIN ETF benchmark |
+| Selezione Periodo | `st.selectbox` | Periodo per il confronto (1m, 3m, 6m, YTD, 1a, 3a, 5a, 7a, 9a, 10a) |
+| Pulsante Confronta | `st.button` | Avvia il confronto |
+| Tabella Risultati | `st.dataframe` | Con colorazione condizionale |
+
+**Logica di confronto:**
+
+```
+Per ogni fondo nell'universo filtrato:
+    perf_fondo = performance del fondo nel periodo selezionato
+    perf_etf = performance dell'ETF nel periodo selezionato
+
+    delta = perf_fondo - perf_etf
+
+    Se delta > 0:
+        fondo BATTE l'ETF (evidenziare in verde)
+    Se delta < 0:
+        fondo NON batte l'ETF (evidenziare in rosso)
+    Se delta == 0:
+        performance PARI (evidenziare in grigio)
+```
+
+#### RF-05: Rimozione Filtri Min/Max Performance [MODIFICA]
+
+**Requisito dal transcript (min. 50):**
+> "A me servirebbe le varie performance che ci sono nel file Excel, ovvero non tanto la performance minima e massima, ma la performance che ha fatto in un arco temporale. Quindi il minimo e il massimo non mi interessa."
+
+**Cambio richiesto:**
+- RIMUOVERE: Input "Perf. min %" e "TER max %"
+- MANTENERE: Selezione periodo temporale per visualizzazione/ordinamento
+- AGGIUNGERE: La logica di filtro "chi batte l'ETF" sostituisce i filtri min/max
+
+#### RF-06: Fix Potenziale Bug Filtri [BUG FIX]
+
+**Segnalazione (punto 1 dei feedback):**
+> "Forse il filtro non viene applicato potrebbe escludere alcuni risultati"
+
+**Azione richiesta:**
+- Verificare che i filtri usino logica inclusiva (>=, <=) non esclusiva (>, <)
+- Verificare che il match delle categorie sia case-insensitive
+- Verificare che i fondi senza categoria non vengano esclusi erroneamente
+- Assicurarsi che il ranking non perda elementi
+
+---
+
+### 2.3 Interfaccia Utente (v4.0)
+
+#### RF-07: Layout Aggiornato
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ 📊 Selettore Rendimenti Fondi/ETF v4.0                          │
 ├─────────────────┬───────────────────────────────────────────────┤
 │                 │                                               │
 │  SIDEBAR        │   MAIN CONTENT                                │
 │                 │                                               │
 │  ┌───────────┐  │   ┌─────────────────────────────────────────┐ │
-│  │📁 CARICA  │  │   │ 📊 Il Mio Universo Fondi               │ │
-│  │ UNIVERSO  │  │   │ ────────────────────────────────────── │ │
-│  │ FONDI     │  │   │ ✅ 45 fondi caricati                   │ │
-│  └───────────┘  │   │ Categorie: 8 | Valute: EUR, USD        │ │
-│                 │   └─────────────────────────────────────────┘ │
-│  ──────────────  │                                               │
-│                 │   ┌─────────────────────────────────────────┐ │
-│  📌 MODALITA'   │   │ [Tab] Ricerca  [Tab] Confronto         │ │
-│  ○ Ricerca      │   ├─────────────────────────────────────────┤ │
-│  ◉ Confronto    │   │                                         │ │
-│    Universo     │   │  Risultati confronto / Tabella dati    │ │
-│                 │   │                                         │ │
-│  ──────────────  │   │  ┌────┬────┬────┬────┬────┬────────┐  │ │
-│                 │   │  │Nome│ISIN│Tipo│1a  │3a  │Δ vs ETF│  │ │
-│  🔍 FILTRI      │   │  ├────┼────┼────┼────┼────┼────────┤  │ │
-│  Categoria      │   │  │... │... │... │... │... │ +2.3%  │  │ │
-│  [Dropdown]     │   │  └────┴────┴────┴────┴────┴────────┘  │ │
-│                 │   │                                         │ │
-│  Periodo        │   └─────────────────────────────────────────┘ │
-│  [Multi-select] │                                               │
-│                 │   ┌─────────────────────────────────────────┐ │
-│  ──────────────  │   │ 📥 SCARICA CONFRONTO EXCEL             │ │
-│                 │   └─────────────────────────────────────────┘ │
-│  [🔎 CONFRONTA] │                                               │
+│  │📁 CARICA  │  │   │ 📊 Universo Caricato                    │ │
+│  │ UNIVERSO  │  │   │ ✅ 3432 fondi | 45 categorie           │ │
+│  └───────────┘  │   └─────────────────────────────────────────┘ │
 │                 │                                               │
+│  ──────────────  │   ┌─────────────────────────────────────────┐ │
+│                 │   │ 🔍 CONFRONTA CON ETF                    │ │
+│  🏷️ CATEGORIE   │   │ ──────────────────────────────────────── │ │
+│  [Multiselect]  │   │                                         │ │
+│  ☑ Large Blend  │   │ ISIN ETF: [________________]            │ │
+│  ☑ Large Growth │   │                                         │ │
+│  ☑ Large Value  │   │ Periodo:  [3 anni ▼]                    │ │
+│  ☐ Mid Cap      │   │                                         │ │
+│  ☐ Small Cap    │   │ [🔎 CONFRONTA]                          │ │
+│                 │   │                                         │ │
+│  ──────────────  │   └─────────────────────────────────────────┘ │
+│                 │                                               │
+│  📊 PERIODO     │   ┌─────────────────────────────────────────┐ │
+│  [3 anni ▼]     │   │ 📋 RISULTATI CONFRONTO                  │ │
+│                 │   │ ──────────────────────────────────────── │ │
+│  ──────────────  │   │ 🎯 Benchmark: iShares S&P 500          │ │
+│                 │   │    Perf. 3a: +45.2%                     │ │
+│  [🔎 FILTRA]    │   │                                         │ │
+│                 │   │ ✅ 127 fondi BATTONO l'ETF              │ │
+│                 │   │ ❌ 215 fondi NON battono l'ETF          │ │
+│                 │   │                                         │ │
+│                 │   │ ┌────┬────┬────┬────┬────────────────┐  │ │
+│                 │   │ │Nome│ISIN│Cat │3a  │Delta vs ETF    │  │ │
+│                 │   │ ├────┼────┼────┼────┼────────────────┤  │ │
+│                 │   │ │... │... │... │52% │ ✅ +6.8%       │  │ │
+│                 │   │ │... │... │... │48% │ ✅ +2.8%       │  │ │
+│                 │   │ │ETF │IE..│-   │45% │ BENCHMARK      │  │ │
+│                 │   │ │... │... │... │42% │ ❌ -3.2%       │  │ │
+│                 │   │ └────┴────┴────┴────┴────────────────┘  │ │
+│                 │   │                                         │ │
+│                 │   │ [📥 SCARICA EXCEL]                      │ │
+│                 │   └─────────────────────────────────────────┘ │
 └─────────────────┴───────────────────────────────────────────────┘
 ```
 
-#### RF-10: Componenti UI Nuovi
+#### RF-08: Componenti UI Nuovi
 
 | Componente | Tipo Streamlit | Descrizione |
 |------------|----------------|-------------|
-| Upload Universo | `st.file_uploader` | Caricamento file Excel |
-| Anteprima Universo | `st.dataframe` | Mostra ISIN caricati |
-| Selettore Modalità | `st.radio` | Ricerca / Confronto |
-| Selettore Periodi | `st.multiselect` | Selezione multipla periodi |
-| Ricerca ETF | `st.text_input` + `st.selectbox` | Ricerca per ISIN o nome |
-| Tabella Confronto | `st.dataframe` con `column_config` | Colori condizionali |
-| Metriche Riepilogo | `st.metric` | Media, best, worst delta |
+| Multiselect Categorie | `st.multiselect` | Selezione multipla categorie Morningstar |
+| Input ISIN ETF | `st.text_input` | Campo per ISIN ETF benchmark |
+| Selezione Periodo | `st.selectbox` | Periodo per confronto |
+| Pulsante Confronta | `st.button` | Avvia confronto con ETF |
+| Metriche Confronto | `st.metric` | Contatori fondi che battono/non battono |
+| Tabella Colorata | `st.dataframe` | Con styling condizionale verde/rosso |
 
 ---
 
 ## 3. Requisiti Tecnici
 
-### 3.1 Architettura (v3.0)
+### 3.1 Architettura (v4.0)
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                    FRONTEND (Streamlit)                         │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐  │
-│  │   Upload    │  │   Filtri    │  │   Tabella Confronto     │  │
-│  │  Universo   │  │   Ricerca   │  │   + Download Excel      │  │
+│  │   Upload    │  │ Multiselect │  │   Confronto ETF         │  │
+│  │  Universo   │  │  Categorie  │  │   + Visualizzazione     │  │
 │  └─────────────┘  └─────────────┘  └─────────────────────────┘  │
 ├─────────────────────────────────────────────────────────────────┤
 │                    BUSINESS LOGIC                                │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐  │
-│  │  Universe   │  │   Search    │  │   Comparison Engine     │  │
-│  │   Loader    │  │   Engine    │  │   (NUOVO)               │  │
+│  │  Universe   │  │  Category   │  │   ETF Comparison        │  │
+│  │   Loader    │  │   Filter    │  │   Engine (NUOVO)        │  │
 │  └─────────────┘  └─────────────┘  └─────────────────────────┘  │
 ├─────────────────────────────────────────────────────────────────┤
 │                    DATA LAYER                                    │
-│  ┌───────────┐  ┌────────────┐  ┌───────────┐  ┌─────────────┐  │
-│  │  JustETF  │  │ Morningstar│  │ Investiny │  │  Universe   │  │
-│  │  Scraper  │  │  Scraper   │  │  Scraper  │  │  Parser     │  │
-│  └───────────┘  └────────────┘  └───────────┘  └─────────────┘  │
+│  ┌───────────┐  ┌────────────┐  ┌───────────────────────────┐  │
+│  │  Excel    │  │ Morningstar│  │  JustETF (per dati ETF)   │  │
+│  │  Parser   │  │  Scraper   │  │                           │  │
+│  └───────────┘  └────────────┘  └───────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
 ### 3.2 Nuovi Moduli da Implementare
 
-| Modulo | Path | Responsabilità |
-|--------|------|----------------|
-| `universe_loader.py` | `core/` | Parsing Excel universo, validazione ISIN |
-| `comparison_engine.py` | `orchestrator/` | Logica confronto fondi vs ETF |
-| `comparison_exporter.py` | `exporters/` | Export Excel con formato confronto |
+| Modulo | Path | Responsabilita' |
+|--------|------|-----------------|
+| `etf_benchmark.py` | `core/` | Recupero dati ETF da fonti esterne |
+| `comparison_calculator.py` | `core/` | Calcolo delta e classificazione fondi |
 
 ### 3.3 Modifiche ai Moduli Esistenti
 
 | Modulo | Modifiche |
 |--------|-----------|
-| `config.py` | Aggiungere periodi 1m, 3m, 6m, 9y |
-| `core/models.py` | Estendere PerformanceData con nuovi periodi |
-| `app.py` | Nuova sezione upload + tab confronto |
-| `scrapers/*.py` | Supporto nuovi periodi (se disponibili dalle fonti) |
+| `app.py` | Nuova sezione confronto ETF, multiselect categorie, rimozione filtri min/max |
+| `universe_loader.py` | Verifica e fix logica filtri |
+| `config.py` | Aggiornamento versione a 4.0 |
 
-### 3.4 Stack Tecnologico (Invariato)
+### 3.4 Recupero Dati ETF Benchmark
 
-| Componente | Tecnologia |
-|------------|------------|
-| Linguaggio | Python 3.11 |
-| Frontend | Streamlit 1.30+ |
-| Data Processing | pandas 2.0+ |
-| Export Excel | openpyxl, xlsxwriter |
-| Scraping | justetf-scraping, mstarpy, investiny |
-| Deployment | **Streamlit Cloud** |
+Per recuperare le performance dell'ETF inserito dall'utente:
 
-### 3.5 Considerazioni Deployment Streamlit Cloud
+**Opzione 1 (Consigliata): Ricerca nell'universo stesso**
+- Se l'ETF e' gia' presente nel file Excel caricato, usa quei dati
+- Vantaggio: nessuna chiamata esterna, dati consistenti
 
-| Aspetto | Gestione |
-|---------|----------|
-| **File temporanei** | Usare `st.session_state` per persistere universo durante sessione |
-| **Limiti risorse** | Max 500 ISIN per universo, timeout 30s per operazione |
-| **Secrets** | Nessuno richiesto (dati pubblici) |
-| **Cache** | `@st.cache_data` per risultati ricerche |
+**Opzione 2: Scraping da fonti esterne**
+- Usa `mstarpy` per recuperare dati da Morningstar
+- Usa `justetf-scraping` per recuperare dati da JustETF
+- Gestire errori se ISIN non trovato
+
+**Implementazione suggerita:**
+```python
+def get_etf_performance(isin: str, universe: List[UniverseInstrument]) -> Optional[dict]:
+    # Prima cerca nell'universo caricato
+    for inst in universe:
+        if inst.isin == isin:
+            return {
+                "name": inst.name,
+                "isin": inst.isin,
+                "perf_1m": inst.perf_1m,
+                "perf_3m": inst.perf_3m,
+                # ... altri periodi
+            }
+
+    # Se non trovato, cerca su fonti esterne
+    return search_external_sources(isin)
+```
 
 ---
 
-## 4. Piano di Implementazione
+## 4. Formato Output Confronto
 
-### Fase 1: Estensione Modelli e Configurazione (2 ore)
+### 4.1 Tabella Confronto
 
-**Obiettivi:**
-- Aggiungere nuovi periodi di performance (1m, 3m, 6m, 9y)
-- Creare modelli dati per Universo Fondi
+| Nome | ISIN | Categoria | Perf. Selezionata | Delta vs ETF | Status |
+|------|------|-----------|-------------------|--------------|--------|
+| ETF Benchmark | IE00B5BMR087 | - | 45.20% | BENCHMARK | 🎯 |
+| Fondo A | LU0123456789 | Az. USA Large Blend | 52.10% | +6.90% | ✅ BATTE |
+| Fondo B | IE9876543210 | Az. USA Large Growth | 48.50% | +3.30% | ✅ BATTE |
+| Fondo C | FR1111111111 | Az. USA Large Value | 42.00% | -3.20% | ❌ NON BATTE |
 
-**Deliverable:**
-- `config.py` aggiornato con nuovi periodi
-- `core/models.py` esteso con `UniverseInstrument` e periodi aggiuntivi
+### 4.2 Metriche Riepilogative
 
-### Fase 2: Universe Loader (3 ore)
-
-**Obiettivi:**
-- Implementare parsing file Excel universo
-- Validazione ISIN
-- Integrazione con UI upload
-
-**Deliverable:**
-- `core/universe_loader.py` completo
-- Widget upload funzionante in `app.py`
-
-### Fase 3: Comparison Engine (4 ore)
-
-**Obiettivi:**
-- Implementare logica confronto Universo vs ETF
-- Implementare logica confronto ETF vs Universo
-- Calcolo delta performance
-
-**Deliverable:**
-- `orchestrator/comparison_engine.py` completo
-- Test unitari per logica confronto
-
-### Fase 4: UI Confronto (3 ore)
-
-**Obiettivi:**
-- Implementare tab/sezione confronto
-- Tabella comparativa con indicatori visivi
-- Selezione multipla periodi
-
-**Deliverable:**
-- `app.py` con nuova sezione confronto
-- UI funzionante per entrambe le modalità
-
-### Fase 5: Export Confronto Excel (2 ore)
-
-**Obiettivi:**
-- Creare template Excel per confronto
-- Formattazione condizionale per delta
-- Foglio riepilogo con statistiche
-
-**Deliverable:**
-- `exporters/comparison_exporter.py` completo
-- Download Excel confronto funzionante
-
-### Fase 6: Testing e Deploy (2 ore)
-
-**Obiettivi:**
-- Test end-to-end con file Excel reali
-- Deploy su Streamlit Cloud
-- Documentazione utente aggiornata
-
-**Deliverable:**
-- Applicazione deployata e funzionante
-- Test superati con dati reali
+| Metrica | Valore |
+|---------|--------|
+| ETF Benchmark | iShares Core S&P 500 (IE00B5BMR087) |
+| Periodo Confronto | 3 anni |
+| Performance ETF | +45.20% |
+| Fondi Analizzati | 342 |
+| Fondi che BATTONO l'ETF | 127 (37.1%) |
+| Fondi che NON battono l'ETF | 215 (62.9%) |
+| Miglior Delta | +18.50% (Fondo XYZ) |
+| Peggior Delta | -12.30% (Fondo ABC) |
+| Media Delta | +2.15% |
 
 ---
 
-## 5. Formato File Excel Universo (Input)
+## 5. Periodi di Performance
 
-### 5.1 Struttura Minima Richiesta
+Il sistema supporta i seguenti periodi (gia' implementati in v3.1):
 
-| Colonna | Obbligatoria | Formato | Esempio |
-|---------|--------------|---------|---------|
-| **ISIN** | ✅ Sì | 12 caratteri | IE00B4L5Y983 |
-| Nome | No | Testo | iShares Core MSCI World |
-| Categoria | No | Testo | Azionari Globali |
-| Note | No | Testo | Preferito per PAC |
-
-### 5.2 Esempio File
-
-```
-| ISIN         | Nome                      | Categoria           | Note          |
-|--------------|---------------------------|---------------------|---------------|
-| LU0322253906 | Xtrackers MSCI World      | Azionari Globali    | Core          |
-| IE00B4L5Y983 | iShares Core MSCI World   | Azionari Globali    | Alternativa   |
-| FR0010315770 | Lyxor S&P 500             | Azionari USA        | -             |
-```
-
-### 5.3 Messaggi di Errore
-
-| Errore | Messaggio |
-|--------|-----------|
-| Colonna ISIN mancante | "Il file deve contenere una colonna 'ISIN'" |
-| ISIN formato invalido | "ISIN '{valore}' non valido (riga {n})" |
-| File vuoto | "Il file non contiene ISIN validi" |
-| Troppi ISIN | "Limite massimo 500 ISIN superato" |
+| Periodo | Chiave | Colonna Excel |
+|---------|--------|---------------|
+| 1 mese | `1m` | Perf. 1m (EUR) |
+| 3 mesi | `3m` | Perf. 3m (EUR) |
+| 6 mesi | `6m` | Perf. 6m (EUR) |
+| YTD | `ytd` | Perf. YTD (EUR) |
+| 1 anno | `1y` | Perf. 1a (EUR) |
+| 3 anni | `3y` | Perf. 3a (EUR) |
+| 5 anni | `5y` | Perf. 5a (EUR) |
+| 7 anni | `7y` | Perf. 7a (EUR) |
+| 9 anni | `9y` | Perf. 9a (EUR) |
+| 10 anni | `10y` | Perf. 10a (EUR) |
 
 ---
 
 ## 6. Criteri di Accettazione
 
-### 6.1 Funzionalità Core (Must Have)
+### 6.1 Funzionalita' Core (Must Have)
 
-- [ ] L'utente può caricare un file Excel con ISIN dei propri fondi
-- [ ] Il sistema valida gli ISIN e mostra quelli validi/invalidi
-- [ ] L'utente può selezionare una categoria e confrontare fondi universo vs ETF
-- [ ] L'utente può selezionare un ETF e confrontarlo con i fondi universo
-- [ ] La tabella mostra le performance su tutti i periodi richiesti (1m-10a)
-- [ ] Il sistema calcola e mostra il delta performance (fondo vs ETF)
-- [ ] L'utente può scaricare un Excel con il confronto completo
-- [ ] L'applicazione funziona correttamente su Streamlit Cloud
+- [ ] L'utente puo' selezionare MULTIPLE categorie Morningstar contemporaneamente
+- [ ] L'utente puo' inserire l'ISIN di un ETF e avviare il confronto
+- [ ] Il sistema calcola il delta performance per ogni fondo vs ETF
+- [ ] I fondi che battono l'ETF sono evidenziati in verde
+- [ ] I fondi che non battono l'ETF sono evidenziati in rosso
+- [ ] La tabella e' ordinata per delta (migliori in alto)
+- [ ] L'utente puo' scaricare i risultati in Excel
+- [ ] I filtri min/max performance sono stati rimossi
+- [ ] Il bug dei filtri che escludono risultati e' stato corretto
 
 ### 6.2 UX/UI (Should Have)
 
-- [ ] Indicatori visivi (colori) per outperformance/underperformance
-- [ ] Metriche riepilogative (media delta, best performer, worst performer)
-- [ ] L'universo persiste durante la sessione senza ricaricare
-- [ ] Progress bar durante le operazioni di ricerca/confronto
-- [ ] Messaggi di errore chiari e user-friendly
+- [ ] Metriche riepilogative (quanti battono, quanti no)
+- [ ] L'ETF benchmark e' mostrato in evidenza nella tabella
+- [ ] Progress bar durante la ricerca dati ETF
+- [ ] Messaggio chiaro se ISIN ETF non trovato
 
-### 6.3 Performance (Nice to Have)
+### 6.3 Edge Cases
 
-- [ ] Tempo caricamento universo < 5 secondi per 100 ISIN
-- [ ] Tempo confronto < 60 secondi per categoria
-- [ ] Cache risultati per evitare ricerche duplicate
+- [ ] Gestione ISIN ETF non valido (formato errato)
+- [ ] Gestione ISIN ETF non trovato (nessun dato)
+- [ ] Gestione fondi senza performance per il periodo selezionato
+- [ ] Gestione universo vuoto o senza categorie
 
 ---
 
@@ -418,28 +379,20 @@ La tabella di confronto deve mostrare:
 
 | Termine | Definizione |
 |---------|-------------|
-| **Universo Fondi** | Insieme di fondi/strumenti che l'utente ha a disposizione, caricato via Excel |
-| **Confronto** | Analisi comparativa delle performance tra fondi universo ed ETF di mercato |
-| **Delta** | Differenza di performance tra un fondo e l'ETF benchmark |
-| **Outperformance** | Quando un fondo supera la performance dell'ETF di riferimento |
-| **Underperformance** | Quando un fondo ha performance inferiore all'ETF di riferimento |
+| **Universo Fondi** | Insieme di ~3000 fondi che Massimo puo' proporre ai clienti |
+| **ETF Benchmark** | ETF di riferimento con cui confrontare i fondi |
+| **Delta** | Differenza di performance: (Perf. Fondo) - (Perf. ETF) |
+| **Batte l'ETF** | Fondo con delta positivo (performance superiore all'ETF) |
+| **Non batte l'ETF** | Fondo con delta negativo (performance inferiore all'ETF) |
 
 ---
 
-## 8. Appendice: Mapping Categorie
+## 8. Changelog da v3.1
 
-Per il confronto, le categorie dell'universo vengono mappate con le categorie ETF:
-
-| Categoria Fondo | Categoria ETF Corrispondente |
-|-----------------|------------------------------|
-| AZ. AMERICA | Azionari USA Large Cap Blend |
-| AZ. EUROPA | Azionari Europa Large Cap Blend |
-| AZ. INTERNAZIONALI | Azionari Globali Large Cap Blend |
-| AZ. PAESI EMERGENTI | Azionari Paesi Emergenti |
-| OBBL. EURO GOV. | Obbligazionari EUR Governativi |
-| ... | ... |
-
-*(Mapping completo da definire in fase di implementazione)*
+| Versione | Data | Modifiche |
+|----------|------|-----------|
+| 3.1 | 22/01/2026 | Upload Excel con dati completi, filtri base |
+| 4.0 | 22/01/2026 | Multiselect categorie, confronto ETF, rimozione filtri min/max |
 
 ---
 

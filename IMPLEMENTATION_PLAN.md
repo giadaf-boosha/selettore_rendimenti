@@ -1,12 +1,23 @@
-# Piano di Implementazione - Selettore Rendimenti v3.0
+# Piano di Implementazione - Selettore Rendimenti v4.0
 
 ## Panoramica
 
-Questo documento descrive il piano di implementazione per le nuove funzionalità del Selettore Rendimenti Fondi/ETF versione 3.0.
+Questo documento descrive il piano di implementazione per la versione 4.0 del Selettore Rendimenti Fondi/ETF, basato sul feedback di Massimo Zaffanella (owner del progetto) raccolto il 22 gennaio 2026.
 
-**Obiettivo principale:** Permettere il confronto tra i fondi del proprio "Universo" e gli ETF di mercato.
+**Obiettivo principale:** Permettere il confronto tra i fondi dell'universo e un ETF benchmark specifico per identificare chi lo batte.
 
 **Deployment target:** Streamlit Cloud
+
+---
+
+## Riepilogo Feedback Ricevuti
+
+| # | Minuto Transcript | Feedback | Azione Richiesta |
+|---|-------------------|----------|------------------|
+| 1 | - | Filtro potrebbe escludere risultati | Bug fix: verificare logica filtri |
+| 2 | 45 | Confronto con ISIN ETF | Nuova funzionalita': inserire ISIN ETF e vedere chi lo batte |
+| 3 | 48 | Selezione multipla categorie Morningstar | Cambiare da `selectbox` a `multiselect` |
+| 4 | 50 | Non vuole min/max ma periodi temporali | Rimuovere filtri min/max performance |
 
 ---
 
@@ -14,584 +25,668 @@ Questo documento descrive il piano di implementazione per le nuove funzionalità
 
 ### Nuovi File da Creare
 
-| File | Descrizione | Priorità |
-|------|-------------|----------|
-| `core/universe_loader.py` | Parsing e validazione file Excel universo | Alta |
-| `orchestrator/comparison_engine.py` | Logica confronto fondi vs ETF | Alta |
-| `exporters/comparison_exporter.py` | Export Excel con formato confronto | Media |
+| File | Descrizione | Priorita' |
+|------|-------------|-----------|
+| `core/etf_benchmark.py` | Recupero dati ETF da universo o fonti esterne | Alta |
+| `core/comparison_calculator.py` | Calcolo delta e classificazione fondi | Alta |
 
 ### File da Modificare
 
-| File | Modifiche | Priorità |
-|------|-----------|----------|
-| `config.py` | Aggiungere periodi 1m, 3m, 6m, 9y | Alta |
-| `core/models.py` | Estendere PerformanceData, aggiungere UniverseInstrument | Alta |
-| `app.py` | Upload universo, tab confronto, nuova UI | Alta |
-| `scrapers/justetf_scraper.py` | Supporto nuovi periodi (se disponibili) | Media |
-| `scrapers/morningstar_scraper.py` | Supporto nuovi periodi (se disponibili) | Media |
-| `exporters/excel_writer.py` | Nuove colonne periodi | Media |
+| File | Modifiche | Priorita' |
+|------|-----------|-----------|
+| `app.py` | Nuova sezione confronto ETF, multiselect categorie, rimozione filtri min/max | Alta |
+| `core/universe_loader.py` | Verifica e fix logica filtri | Alta |
+| `config.py` | Aggiornamento versione a 4.0 | Media |
 
 ---
 
-## Fase 1: Estensione Modelli e Configurazione
+## Fase 1: Bug Fix Filtri
 
-**Durata stimata:** 2 ore
+**Durata stimata:** 1 ora
 
-### 1.1 Aggiornare `config.py`
+### 1.1 Analisi del Problema
+
+Il feedback indica che i filtri potrebbero escludere risultati che dovrebbero essere inclusi. Verificare:
+
+1. **Logica inclusiva vs esclusiva**: Assicurarsi che i filtri usino `>=` e `<=` invece di `>` e `<`
+2. **Case sensitivity**: Verificare che il match delle categorie sia case-insensitive
+3. **Valori null**: Verificare che i fondi senza categoria non vengano esclusi erroneamente
+4. **Ranking**: Assicurarsi che la funzione `rank_by_performance` non perda elementi
+
+### 1.2 Verifiche da Effettuare
 
 ```python
-# Nuovi periodi da aggiungere
-PERFORMANCE_PERIODS: Dict[str, str] = {
-    "1 mese": "1m",      # NUOVO
-    "3 mesi": "3m",      # NUOVO
-    "6 mesi": "6m",      # NUOVO
-    "YTD": "ytd",
-    "1 anno": "1y",
-    "3 anni": "3y",
-    "5 anni": "5y",
-    "7 anni": "7y",
-    "9 anni": "9y",      # NUOVO
-    "10 anni": "10y",
-}
+# In core/universe_loader.py
 
-# Limiti per universo
-UNIVERSE_MAX_ISINS = 500
-UNIVERSE_ALLOWED_EXTENSIONS = [".xlsx", ".xls"]
+# 1. Verifica filter_by_performance usa >= e <= (non > e <)
+def filter_by_performance(instruments, period, min_value=None, max_value=None):
+    result = []
+    for inst in instruments:
+        perf = inst.get_performance_by_period(period)
+        if perf is None:
+            continue  # OK: esclude solo se non ha il dato
+        if min_value is not None and perf < min_value:  # < e' corretto (esclude se sotto minimo)
+            continue
+        if max_value is not None and perf > max_value:  # > e' corretto (esclude se sopra massimo)
+            continue
+        result.append(inst)
+    return result
+
+# 2. Verifica match categorie in app.py (gia' usa .lower() per case-insensitivity)
+# Ma verificare che il match sia inclusivo (substring match)
 ```
 
-### 1.2 Aggiornare `core/models.py`
+### 1.3 Test di Verifica
 
-**PerformanceData esteso:**
+Creare test per verificare che i filtri funzionino correttamente:
+
+- Test filtro categoria con case diversi
+- Test filtro con valori al limite (boundary conditions)
+- Test ranking mantiene tutti gli elementi
+
+---
+
+## Fase 2: Selezione Multipla Categorie Morningstar
+
+**Durata stimata:** 1 ora
+
+### 2.1 Modifica UI in `app.py`
+
+**Codice attuale (da modificare):**
 ```python
-@dataclass
-class PerformanceData:
-    return_1m: Optional[float] = None   # NUOVO
-    return_3m: Optional[float] = None   # NUOVO
-    return_6m: Optional[float] = None   # NUOVO
-    ytd: Optional[float] = None
-    return_1y: Optional[float] = None
-    return_3y: Optional[float] = None
-    return_5y: Optional[float] = None
-    return_7y: Optional[float] = None
-    return_9y: Optional[float] = None   # NUOVO
-    return_10y: Optional[float] = None
+# PRIMA (selectbox singolo)
+category_filter = st.selectbox(
+    "Categoria Morningstar",
+    options=["Tutte"] + available_categories,
+    index=0,
+    help="Filtra per categoria Morningstar"
+)
 ```
 
-**Nuovo dataclass UniverseInstrument:**
+**Nuovo codice:**
 ```python
-@dataclass
-class UniverseInstrument:
-    """Strumento caricato dall'universo utente."""
-    isin: str
-    name: Optional[str] = None
-    category: Optional[str] = None
-    notes: Optional[str] = None
-    source_row: int = 0  # Riga nel file Excel originale
+# DOPO (multiselect multiplo)
+selected_categories = st.multiselect(
+    "Categorie Morningstar",
+    options=available_categories,
+    default=[],
+    help="Seleziona una o piu' categorie (lascia vuoto per mostrare tutte)"
+)
 ```
 
-**Nuovo dataclass ComparisonResult:**
+### 2.2 Modifica Logica Filtro
+
+**Codice attuale (da modificare):**
 ```python
-@dataclass
-class ComparisonResult:
-    """Risultato confronto singolo strumento."""
-    instrument: AggregatedInstrument
-    origin: str  # "universe" o "market"
-    benchmark_isin: Optional[str] = None
-    delta_1m: Optional[float] = None
-    delta_3m: Optional[float] = None
-    delta_6m: Optional[float] = None
-    delta_ytd: Optional[float] = None
-    delta_1y: Optional[float] = None
-    delta_3y: Optional[float] = None
-    delta_5y: Optional[float] = None
-    delta_7y: Optional[float] = None
-    delta_9y: Optional[float] = None
-    delta_10y: Optional[float] = None
+# PRIMA
+if category_filter and category_filter != "Tutte":
+    filtered = [
+        inst for inst in filtered
+        if inst.category_morningstar and category_filter.lower() in inst.category_morningstar.lower()
+    ]
 ```
 
-### 1.3 Aggiornare `AggregatedInstrument`
-
-Aggiungere campi per i nuovi periodi:
+**Nuovo codice:**
 ```python
-perf_1m_eur: Optional[float] = None
-perf_3m_eur: Optional[float] = None
-perf_6m_eur: Optional[float] = None
-perf_9y_eur: Optional[float] = None
+# DOPO
+if selected_categories:  # Se almeno una categoria selezionata
+    filtered = [
+        inst for inst in filtered
+        if inst.category_morningstar and any(
+            cat.lower() in inst.category_morningstar.lower()
+            for cat in selected_categories
+        )
+    ]
+# Se nessuna categoria selezionata, mostra tutti i fondi (nessun filtro)
 ```
 
 ---
 
-## Fase 2: Universe Loader
+## Fase 3: Rimozione Filtri Min/Max Performance
 
-**Durata stimata:** 3 ore
+**Durata stimata:** 30 minuti
 
-### 2.1 Creare `core/universe_loader.py`
+### 3.1 Elementi da Rimuovere in `app.py`
 
-**Funzionalità:**
-- `load_universe(file_bytes: BytesIO) -> List[UniverseInstrument]`
-- `validate_isin(isin: str) -> bool`
-- `detect_isin_column(df: DataFrame) -> str`
-- `parse_excel(file_bytes: BytesIO) -> DataFrame`
+Rimuovere completamente:
 
-**Schema:**
-```python
-class UniverseLoader:
-    """Carica e valida l'universo fondi da file Excel."""
+1. Input "Perf. min %" (`st.number_input` con label "Perf. min %")
+2. Input "TER max %" (`st.number_input` con label "TER max %")
+3. Logica di filtro associata in `apply_filters()`
+4. Parametri `min_perf`, `max_ter` dalla funzione
 
-    MAX_ISINS = 500
-    ISIN_PATTERN = re.compile(r'^[A-Z]{2}[A-Z0-9]{9}[0-9]$')
+### 3.2 Elementi da Mantenere
 
-    def load(self, file: BytesIO) -> UniverseLoadResult:
-        """
-        Carica universo da file Excel.
-
-        Returns:
-            UniverseLoadResult con instruments validi e errori
-        """
-        pass
-
-    def _detect_isin_column(self, df: DataFrame) -> Optional[str]:
-        """Rileva automaticamente la colonna ISIN."""
-        pass
-
-    def _validate_isin(self, isin: str) -> bool:
-        """Valida formato ISIN."""
-        pass
-
-@dataclass
-class UniverseLoadResult:
-    instruments: List[UniverseInstrument]
-    errors: List[str]
-    warnings: List[str]
-    total_rows: int
-    valid_count: int
-    invalid_count: int
-```
-
-### 2.2 Gestione Errori
-
-| Errore | Codice | Messaggio |
-|--------|--------|-----------|
-| Colonna ISIN non trovata | E001 | "Impossibile trovare colonna ISIN nel file" |
-| ISIN invalido | W001 | "ISIN '{value}' non valido (riga {row})" |
-| File vuoto | E002 | "Il file non contiene dati" |
-| Limite superato | E003 | "Superato limite di {MAX_ISINS} ISIN" |
-| Formato file errato | E004 | "Formato file non supportato" |
+- Selezione periodo per ordinamento (utile per visualizzare/ordinare)
+- Ranking per performance (senza filtro soglia)
 
 ---
 
-## Fase 3: Comparison Engine
+## Fase 4: Confronto con ETF Benchmark (Funzionalita' Principale)
 
 **Durata stimata:** 4 ore
 
-### 3.1 Creare `orchestrator/comparison_engine.py`
-
-**Funzionalità principali:**
+### 4.1 Creare `core/etf_benchmark.py`
 
 ```python
-class ComparisonEngine:
-    """Motore di confronto fondi universo vs ETF."""
+"""
+ETF Benchmark - Recupero dati ETF per confronto.
+"""
+from typing import Optional, List
+from core.models import UniverseInstrument
+from core.universe_loader import validate_isin
+import logging
 
-    def __init__(self, search_engine: SearchEngine):
-        self.search_engine = search_engine
-        self.merger = DataMerger()
+logger = logging.getLogger(__name__)
 
-    def compare_universe_vs_etf_by_category(
-        self,
-        universe: List[UniverseInstrument],
-        category: str,
-        category_type: str,  # "morningstar" o "assogestioni"
-        periods: List[str],
-        progress_callback: Optional[ProgressCallback] = None
-    ) -> ComparisonReport:
-        """
-        Confronta fondi universo con ETF della stessa categoria.
 
-        Flusso:
-        1. Filtra universe per categoria
-        2. Arricchisci fondi universe con dati da fonti
-        3. Cerca ETF della stessa categoria
-        4. Calcola delta performance
-        5. Genera report confronto
-        """
-        pass
+def find_etf_in_universe(
+    isin: str,
+    universe: List[UniverseInstrument]
+) -> Optional[UniverseInstrument]:
+    """
+    Cerca l'ETF nell'universo caricato.
 
-    def compare_etf_vs_universe(
-        self,
-        etf_isin: str,
-        universe: List[UniverseInstrument],
-        periods: List[str],
-        progress_callback: Optional[ProgressCallback] = None
-    ) -> ComparisonReport:
-        """
-        Confronta un ETF specifico con i fondi dell'universo.
+    Args:
+        isin: ISIN dell'ETF da cercare
+        universe: Lista strumenti dell'universo
 
-        Flusso:
-        1. Recupera dati ETF da fonti
-        2. Identifica categoria ETF
-        3. Filtra/mostra fondi universo (stessa categoria o tutti)
-        4. Calcola delta performance
-        5. Genera report confronto
-        """
-        pass
+    Returns:
+        UniverseInstrument se trovato, None altrimenti
+    """
+    isin_upper = isin.strip().upper()
 
-    def _calculate_deltas(
-        self,
-        instrument: AggregatedInstrument,
-        benchmark: AggregatedInstrument,
-        periods: List[str]
-    ) -> Dict[str, Optional[float]]:
-        """Calcola differenze di performance."""
-        pass
+    for inst in universe:
+        if inst.isin == isin_upper:
+            return inst
 
-    def _map_category(
-        self,
-        category: str,
-        from_type: str,
-        to_type: str
-    ) -> Optional[str]:
-        """Mappa categoria tra sistemi (Morningstar <-> Assogestioni)."""
-        pass
+    return None
+
+
+def get_etf_from_external_sources(isin: str) -> Optional[dict]:
+    """
+    Recupera dati ETF da fonti esterne (Morningstar, JustETF).
+
+    Args:
+        isin: ISIN dell'ETF
+
+    Returns:
+        Dict con dati ETF o None se non trovato
+    """
+    # Prova Morningstar
+    try:
+        from scrapers.morningstar_scraper import MorningstarScraper
+        scraper = MorningstarScraper()
+        results = scraper.search_by_isin(isin)
+        if results:
+            return results[0]
+    except Exception as e:
+        logger.warning(f"Morningstar search failed for {isin}: {e}")
+
+    # Prova JustETF
+    try:
+        from scrapers.justetf_scraper import JustETFScraper
+        scraper = JustETFScraper()
+        results = scraper.search_by_isin(isin)
+        if results:
+            return results[0]
+    except Exception as e:
+        logger.warning(f"JustETF search failed for {isin}: {e}")
+
+    return None
+
+
+def get_etf_benchmark(
+    isin: str,
+    universe: List[UniverseInstrument]
+) -> Optional[UniverseInstrument]:
+    """
+    Recupera dati ETF benchmark, prima dall'universo poi da fonti esterne.
+
+    Args:
+        isin: ISIN dell'ETF benchmark
+        universe: Lista strumenti dell'universo
+
+    Returns:
+        UniverseInstrument con dati ETF o None se non trovato
+    """
+    # Valida formato ISIN
+    if not validate_isin(isin):
+        logger.warning(f"ISIN non valido: {isin}")
+        return None
+
+    # Prima cerca nell'universo (piu' veloce e dati consistenti)
+    etf = find_etf_in_universe(isin, universe)
+    if etf:
+        logger.info(f"ETF {isin} trovato nell'universo")
+        return etf
+
+    # Se non trovato, cerca su fonti esterne
+    logger.info(f"ETF {isin} non nell'universo, cerco su fonti esterne...")
+    external_data = get_etf_from_external_sources(isin)
+
+    if external_data:
+        # Converti in UniverseInstrument
+        return UniverseInstrument(
+            isin=isin.upper(),
+            name=external_data.get("name", isin),
+            category_morningstar=external_data.get("category_morningstar"),
+            perf_ytd=external_data.get("perf_ytd_eur"),
+            perf_1m=external_data.get("perf_1m_eur"),
+            perf_3m=external_data.get("perf_3m_eur"),
+            perf_6m=external_data.get("perf_6m_eur"),
+            perf_1y=external_data.get("perf_1y_eur"),
+            perf_3y=external_data.get("perf_3y_eur"),
+            perf_5y=external_data.get("perf_5y_eur"),
+            perf_7y=external_data.get("perf_7y_eur"),
+            perf_9y=external_data.get("perf_9y_eur"),
+            perf_10y=external_data.get("perf_10y_eur"),
+        )
+
+    logger.warning(f"ETF {isin} non trovato in nessuna fonte")
+    return None
 ```
 
-### 3.2 ComparisonReport
+### 4.2 Creare `core/comparison_calculator.py`
 
 ```python
+"""
+Comparison Calculator - Calcola delta performance vs ETF benchmark.
+"""
+from typing import List, Optional, Dict
+from dataclasses import dataclass, field
+from core.models import UniverseInstrument
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class ComparisonResult:
+    """Risultato confronto singolo fondo vs ETF."""
+    instrument: UniverseInstrument
+    etf_performance: Optional[float]
+    fund_performance: Optional[float]
+    delta: Optional[float]
+    beats_etf: Optional[bool]  # True = batte, False = non batte, None = N/A
+
+    @property
+    def status(self) -> str:
+        if self.beats_etf is True:
+            return "BATTE"
+        elif self.beats_etf is False:
+            return "NON BATTE"
+        else:
+            return "N/A"
+
+
 @dataclass
 class ComparisonReport:
-    """Report completo del confronto."""
-
-    # Metadata
-    comparison_type: str  # "universe_vs_etf" o "etf_vs_universe"
-    category: Optional[str] = None
-    benchmark_etf: Optional[AggregatedInstrument] = None
-    periods_analyzed: List[str] = field(default_factory=list)
-    generated_at: datetime = field(default_factory=datetime.now)
-
-    # Risultati
+    """Report completo confronto universo vs ETF."""
+    etf_benchmark: UniverseInstrument
+    period: str
+    period_label: str
     results: List[ComparisonResult] = field(default_factory=list)
 
-    # Statistiche
-    total_instruments: int = 0
-    outperformers_count: int = 0
-    underperformers_count: int = 0
-    avg_delta: Dict[str, float] = field(default_factory=dict)
-    best_performer: Optional[ComparisonResult] = None
-    worst_performer: Optional[ComparisonResult] = None
+    @property
+    def total_funds(self) -> int:
+        return len(self.results)
 
-    def to_dataframe(self) -> pd.DataFrame:
-        """Converte in DataFrame per visualizzazione."""
-        pass
-```
+    @property
+    def funds_beating_etf(self) -> int:
+        return sum(1 for r in self.results if r.beats_etf is True)
 
-### 3.3 Logica di Matching Categorie
+    @property
+    def funds_not_beating_etf(self) -> int:
+        return sum(1 for r in self.results if r.beats_etf is False)
 
-Creare mapping tra categorie Assogestioni e Morningstar:
+    @property
+    def funds_no_data(self) -> int:
+        return sum(1 for r in self.results if r.beats_etf is None)
 
-```python
-CATEGORY_MAPPING = {
-    # Assogestioni -> Morningstar
-    "AZ. AMERICA": ["Azionari USA Large Cap Blend", "Azionari USA Large Cap Growth", "Azionari USA Large Cap Value"],
-    "AZ. EUROPA": ["Azionari Europa Large Cap Blend", "Azionari Europa Large Cap Growth"],
-    "AZ. INTERNAZIONALI": ["Azionari Globali Large Cap Blend", "Azionari Globali Large Cap Growth"],
-    "AZ. PAESI EMERGENTI": ["Azionari Paesi Emergenti"],
-    "AZ. ITALIA": ["Azionari Italia"],
-    # ... completare
-}
-```
+    @property
+    def etf_performance(self) -> Optional[float]:
+        return self.etf_benchmark.get_performance_by_period(self.period)
 
----
+    @property
+    def avg_delta(self) -> Optional[float]:
+        deltas = [r.delta for r in self.results if r.delta is not None]
+        if deltas:
+            return sum(deltas) / len(deltas)
+        return None
 
-## Fase 4: UI Confronto
+    @property
+    def best_performer(self) -> Optional[ComparisonResult]:
+        valid = [r for r in self.results if r.delta is not None]
+        if valid:
+            return max(valid, key=lambda r: r.delta)
+        return None
 
-**Durata stimata:** 3 ore
+    @property
+    def worst_performer(self) -> Optional[ComparisonResult]:
+        valid = [r for r in self.results if r.delta is not None]
+        if valid:
+            return min(valid, key=lambda r: r.delta)
+        return None
 
-### 4.1 Modifiche a `app.py`
+    def get_sorted_results(self, ascending: bool = False) -> List[ComparisonResult]:
+        """Restituisce risultati ordinati per delta (default: migliori prima)."""
+        # Separa risultati con e senza delta
+        with_delta = [r for r in self.results if r.delta is not None]
+        without_delta = [r for r in self.results if r.delta is None]
 
-**Nuova struttura:**
+        # Ordina quelli con delta
+        sorted_with_delta = sorted(
+            with_delta,
+            key=lambda r: r.delta,
+            reverse=not ascending
+        )
 
-```python
-# Sezione Upload Universo (sidebar)
-with st.sidebar:
-    st.subheader("📁 Universo Fondi")
-    uploaded_file = st.file_uploader(
-        "Carica file Excel",
-        type=["xlsx", "xls"],
-        help="File con colonna ISIN dei tuoi fondi"
+        # Risultati senza delta alla fine
+        return sorted_with_delta + without_delta
+
+
+def compare_universe_vs_etf(
+    universe: List[UniverseInstrument],
+    etf_benchmark: UniverseInstrument,
+    period: str,
+    period_label: str
+) -> ComparisonReport:
+    """
+    Confronta tutti i fondi dell'universo con l'ETF benchmark.
+
+    Args:
+        universe: Lista fondi da confrontare
+        etf_benchmark: ETF di riferimento
+        period: Codice periodo (1m, 3m, 6m, ytd, 1y, 3y, 5y, 7y, 9y, 10y)
+        period_label: Label periodo per display (es. "3 anni")
+
+    Returns:
+        ComparisonReport con tutti i risultati
+    """
+    report = ComparisonReport(
+        etf_benchmark=etf_benchmark,
+        period=period,
+        period_label=period_label
     )
 
-    if uploaded_file:
-        # Carica e valida
-        result = universe_loader.load(uploaded_file)
-        st.session_state.universe = result.instruments
+    etf_perf = etf_benchmark.get_performance_by_period(period)
 
-        # Mostra riepilogo
-        st.success(f"✅ {result.valid_count} fondi caricati")
-        if result.warnings:
-            with st.expander("⚠️ Avvisi"):
-                for w in result.warnings:
-                    st.warning(w)
+    for fund in universe:
+        # Escludi l'ETF stesso dal confronto
+        if fund.isin == etf_benchmark.isin:
+            continue
 
-# Selezione modalità
-modalita = st.radio(
-    "Modalità",
-    ["🔍 Ricerca", "📊 Confronto Universo vs ETF", "📈 Confronto ETF vs Universo"],
-    horizontal=True
-)
+        fund_perf = fund.get_performance_by_period(period)
 
-if modalita == "📊 Confronto Universo vs ETF":
-    # UI per confronto categoria
-    categoria = st.selectbox("Categoria", categorie_disponibili)
-    periodi = st.multiselect("Periodi", list(PERFORMANCE_PERIODS.keys()), default=["1 anno", "3 anni", "5 anni"])
+        # Calcola delta e status
+        if etf_perf is not None and fund_perf is not None:
+            delta = round(fund_perf - etf_perf, 4)  # In decimale
+            beats_etf = delta > 0
+        else:
+            delta = None
+            beats_etf = None
 
-    if st.button("🔎 CONFRONTA"):
-        # Esegui confronto
-        report = comparison_engine.compare_universe_vs_etf_by_category(...)
+        result = ComparisonResult(
+            instrument=fund,
+            etf_performance=etf_perf,
+            fund_performance=fund_perf,
+            delta=delta,
+            beats_etf=beats_etf
+        )
 
-        # Mostra risultati
-        display_comparison_results(report)
+        report.results.append(result)
 
-elif modalita == "📈 Confronto ETF vs Universo":
-    # UI per confronto ETF specifico
-    etf_search = st.text_input("Cerca ETF (ISIN o nome)")
+    logger.info(
+        f"Confronto completato: {report.funds_beating_etf} battono ETF, "
+        f"{report.funds_not_beating_etf} non battono, {report.funds_no_data} N/A"
+    )
 
-    # ... logica ricerca e confronto
+    return report
 ```
 
-### 4.2 Componenti Visualizzazione
-
-**Tabella Confronto con Colori:**
+### 4.3 Aggiornare `app.py` con Sezione Confronto
 
 ```python
-def display_comparison_table(report: ComparisonReport):
-    """Mostra tabella confronto con indicatori visivi."""
+# Nuova sezione nel main content
 
-    df = report.to_dataframe()
+if st.session_state.universe_loaded:
+    st.divider()
+    st.subheader("🎯 Confronta con ETF Benchmark")
 
-    # Configurazione colonne con colori
-    column_config = {
-        "Delta 1a": st.column_config.NumberColumn(
-            "Δ 1a",
-            format="%.2f%%",
-            help="Differenza vs ETF benchmark"
-        ),
-        # ... altre colonne
-    }
-
-    # Styling con colori
-    def color_delta(val):
-        if val is None:
-            return ""
-        if val > 0.5:
-            return "background-color: #90EE90"  # Verde chiaro
-        elif val < -0.5:
-            return "background-color: #FFB6C1"  # Rosso chiaro
-        return ""
-
-    styled_df = df.style.applymap(color_delta, subset=delta_columns)
-
-    st.dataframe(styled_df, column_config=column_config, hide_index=True)
-```
-
-**Metriche Riepilogo:**
-
-```python
-def display_comparison_metrics(report: ComparisonReport):
-    """Mostra metriche riepilogative."""
-
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2 = st.columns([2, 1])
 
     with col1:
-        st.metric(
-            "Strumenti Confrontati",
-            report.total_instruments
+        etf_isin = st.text_input(
+            "ISIN ETF Benchmark",
+            placeholder="Es: IE00B5BMR087",
+            help="Inserisci l'ISIN dell'ETF con cui confrontare i fondi"
         )
 
     with col2:
-        st.metric(
-            "Outperformer",
-            report.outperformers_count,
-            delta=f"{report.outperformers_count/report.total_instruments*100:.0f}%"
+        comparison_period_label = st.selectbox(
+            "Periodo Confronto",
+            options=list(PERFORMANCE_PERIODS.keys()),
+            index=4,  # default: 1 anno
+            help="Periodo per il calcolo del delta"
         )
+        comparison_period = PERFORMANCE_PERIODS[comparison_period_label]
 
-    with col3:
-        st.metric(
-            "Media Delta 3a",
-            f"{report.avg_delta.get('3y', 0):.2f}%"
-        )
+    if st.button("🔎 CONFRONTA CON ETF", type="primary", use_container_width=True):
+        if not etf_isin:
+            st.warning("Inserisci l'ISIN dell'ETF benchmark")
+        else:
+            # Recupera ETF
+            from core.etf_benchmark import get_etf_benchmark
+            from core.comparison_calculator import compare_universe_vs_etf
 
-    with col4:
-        if report.best_performer:
-            st.metric(
-                "Best Performer",
-                report.best_performer.instrument.name[:20] + "..."
-            )
+            with st.spinner("Ricerca dati ETF..."):
+                etf = get_etf_benchmark(etf_isin, st.session_state.filtered_instruments)
+
+            if etf is None:
+                st.error(f"ETF con ISIN '{etf_isin}' non trovato")
+            else:
+                # Esegui confronto
+                report = compare_universe_vs_etf(
+                    st.session_state.filtered_instruments,
+                    etf,
+                    comparison_period,
+                    comparison_period_label
+                )
+
+                # Mostra risultati
+                st.success(f"Confronto completato con {etf.name or etf.isin}")
+
+                # Metriche
+                col1, col2, col3, col4 = st.columns(4)
+
+                with col1:
+                    etf_perf = report.etf_performance
+                    if etf_perf:
+                        st.metric("Perf. ETF", f"{etf_perf * 100:.2f}%")
+                    else:
+                        st.metric("Perf. ETF", "N/A")
+
+                with col2:
+                    st.metric(
+                        "Battono ETF",
+                        report.funds_beating_etf,
+                        delta=f"{report.funds_beating_etf / max(report.total_funds, 1) * 100:.0f}%"
+                    )
+
+                with col3:
+                    st.metric(
+                        "Non Battono",
+                        report.funds_not_beating_etf
+                    )
+
+                with col4:
+                    if report.avg_delta:
+                        st.metric("Media Delta", f"{report.avg_delta * 100:.2f}%")
+                    else:
+                        st.metric("Media Delta", "N/A")
+
+                # Tabella risultati
+                st.divider()
+                st.subheader("📋 Risultati Confronto")
+
+                # Converti in DataFrame per visualizzazione
+                comparison_data = []
+                for r in report.get_sorted_results():
+                    row = {
+                        "Nome": r.instrument.name or r.instrument.isin,
+                        "ISIN": r.instrument.isin,
+                        "Categoria": r.instrument.category_morningstar or "",
+                        f"Perf. {comparison_period_label}": f"{r.fund_performance * 100:.2f}%" if r.fund_performance else "N/A",
+                        "Delta vs ETF": f"{r.delta * 100:+.2f}%" if r.delta else "N/A",
+                        "Status": r.status
+                    }
+                    comparison_data.append(row)
+
+                df_comparison = pd.DataFrame(comparison_data)
+
+                # Mostra tabella
+                st.dataframe(
+                    df_comparison,
+                    hide_index=True,
+                    use_container_width=True,
+                    height=500
+                )
+
+                # Download
+                # ... (logica export Excel)
 ```
 
 ---
 
-## Fase 5: Export Confronto Excel
+## Fase 5: Testing
 
-**Durata stimata:** 2 ore
+**Durata stimata:** 1 ora
 
-### 5.1 Creare `exporters/comparison_exporter.py`
+### 5.1 Test Manuali da Eseguire
 
-```python
-class ComparisonExporter:
-    """Esporta report confronto in Excel formattato."""
+1. **Test selezione multipla categorie:**
+   - Selezionare 0 categorie -> mostra tutti
+   - Selezionare 1 categoria -> mostra solo quella
+   - Selezionare 3 categorie -> mostra unione delle 3
 
-    def export(self, report: ComparisonReport) -> BytesIO:
-        """
-        Genera file Excel con confronto.
+2. **Test confronto ETF:**
+   - ISIN valido presente nell'universo -> confronto immediato
+   - ISIN valido non presente -> ricerca esterna (se implementata)
+   - ISIN non valido -> messaggio errore
+   - ISIN non trovato -> messaggio errore
 
-        Fogli:
-        1. "Confronto" - Tabella principale con delta
-        2. "Riepilogo" - Statistiche e metriche
-        3. "Benchmark" - Dettagli ETF benchmark
-        """
-        pass
+3. **Test calcolo delta:**
+   - Fondo con perf > ETF -> delta positivo, status "BATTE"
+   - Fondo con perf < ETF -> delta negativo, status "NON BATTE"
+   - Fondo senza perf -> delta N/A, status "N/A"
 
-    def _create_comparison_sheet(self, ws, report):
-        """Crea foglio confronto con formattazione condizionale."""
-        pass
+### 5.2 Test Automatici
 
-    def _create_summary_sheet(self, ws, report):
-        """Crea foglio riepilogo."""
-        pass
+File: `tests/test_comparison.py`
 
-    def _apply_conditional_formatting(self, ws, delta_columns):
-        """Applica colori condizionali a delta."""
-        # Verde per positivi, rosso per negativi
-        pass
-```
-
-### 5.2 Formato Excel Output
-
-**Foglio "Confronto":**
-
-| Nome | ISIN | Origine | Cat. | 1m | 3m | 6m | YTD | 1a | 3a | 5a | 7a | 9a | 10a | Δ1a | Δ3a | Δ5a |
-|------|------|---------|------|----|----|----|----|----|----|----|----|----|----|-----|-----|-----|
-| Fondo A | LU... | Universo | Az. USA | 2.1% | 5.3% | ... | ... | 12.5% | 45.2% | ... | ... | ... | ... | +2.3% | +5.1% | -1.2% |
-| ETF Benchmark | IE... | Mercato | Az. USA | 1.8% | 4.9% | ... | ... | 10.2% | 40.1% | ... | ... | ... | ... | - | - | - |
-
-**Foglio "Riepilogo":**
-
-| Metrica | Valore |
-|---------|--------|
-| Data confronto | 22/01/2026 |
-| Categoria | Azionari USA |
-| ETF Benchmark | iShares Core S&P 500 |
-| Fondi confrontati | 12 |
-| Outperformer (3a) | 5 (42%) |
-| Media Delta 3a | +2.8% |
-| Best Performer | Fondo XYZ (+8.5%) |
-| Worst Performer | Fondo ABC (-3.2%) |
-
----
-
-## Fase 6: Testing e Deploy
-
-**Durata stimata:** 2 ore
-
-### 6.1 Test Unitari
-
-**File: `tests/unit/test_universe_loader.py`**
-```python
-def test_load_valid_excel():
-    """Test caricamento file Excel valido."""
-    pass
-
-def test_validate_isin_format():
-    """Test validazione formato ISIN."""
-    pass
-
-def test_detect_isin_column():
-    """Test rilevamento automatico colonna ISIN."""
-    pass
-
-def test_handle_invalid_isins():
-    """Test gestione ISIN invalidi."""
-    pass
-
-def test_max_isins_limit():
-    """Test limite massimo ISIN."""
-    pass
-```
-
-**File: `tests/unit/test_comparison_engine.py`**
 ```python
 def test_compare_universe_vs_etf():
-    """Test confronto universo vs ETF."""
+    """Test confronto base."""
     pass
 
-def test_calculate_deltas():
-    """Test calcolo delta performance."""
+def test_delta_calculation():
+    """Test calcolo delta."""
     pass
 
-def test_category_mapping():
-    """Test mapping categorie."""
+def test_multiselect_categories():
+    """Test selezione multipla categorie."""
     pass
 ```
 
-### 6.2 Test Integrazione
+---
 
-**File: `tests/integration/test_comparison_flow.py`**
+## Fase 6: Deploy
+
+**Durata stimata:** 30 minuti
+
+### 6.1 Aggiornare `config.py`
+
 ```python
-def test_full_comparison_flow():
-    """Test flusso completo upload -> confronto -> export."""
-    pass
+version: str = "4.0.0"
 ```
 
-### 6.3 Checklist Deploy Streamlit Cloud
+### 6.2 Checklist Deploy
 
-- [ ] Verificare `requirements.txt` aggiornato
+- [ ] Aggiornare `config.py` con versione 4.0.0
 - [ ] Testare in locale con `streamlit run app.py`
-- [ ] Push su GitHub (branch main o production)
+- [ ] Commit e push su GitHub
 - [ ] Verificare deploy automatico su Streamlit Cloud
 - [ ] Test funzionale su URL pubblico
-- [ ] Verificare performance con 100+ ISIN
+- [ ] Verificare confronto ETF con ISIN reale
 
 ---
 
 ## Dipendenze tra Fasi
 
 ```
-Fase 1 (Modelli) ─────┬────> Fase 2 (Universe Loader)
-                      │
-                      └────> Fase 3 (Comparison Engine) ────> Fase 4 (UI)
-                                                                  │
-                                                                  v
-                                                        Fase 5 (Export)
-                                                                  │
-                                                                  v
-                                                        Fase 6 (Deploy)
+Fase 1 (Bug Fix Filtri)
+         │
+         v
+Fase 2 (Multiselect Categorie)
+         │
+         v
+Fase 3 (Rimozione Filtri Min/Max)
+         │
+         v
+Fase 4 (Confronto ETF) ─────────> Fase 5 (Testing)
+                                        │
+                                        v
+                                  Fase 6 (Deploy)
 ```
-
----
-
-## Rischi e Mitigazioni
-
-| Rischio | Probabilità | Impatto | Mitigazione |
-|---------|-------------|---------|-------------|
-| API fonti non supportano nuovi periodi | Media | Alto | Usare solo periodi disponibili, mostrare N/A |
-| Performance lenta con 500 ISIN | Media | Medio | Cache aggressiva, progress bar, timeout |
-| Mapping categorie incompleto | Alta | Medio | Permettere selezione manuale categoria ETF |
-| File Excel formati diversi | Media | Basso | Rilevamento automatico + messaggi chiari |
 
 ---
 
 ## Stima Effort Totale
 
-| Fase | Ore | Priorità |
-|------|-----|----------|
-| Fase 1: Modelli e Config | 2 | Alta |
-| Fase 2: Universe Loader | 3 | Alta |
-| Fase 3: Comparison Engine | 4 | Alta |
-| Fase 4: UI Confronto | 3 | Alta |
-| Fase 5: Export Excel | 2 | Media |
-| Fase 6: Testing e Deploy | 2 | Alta |
-| **TOTALE** | **16** | - |
+| Fase | Ore | Priorita' |
+|------|-----|-----------|
+| Fase 1: Bug Fix Filtri | 1 | Alta |
+| Fase 2: Multiselect Categorie | 1 | Alta |
+| Fase 3: Rimozione Filtri Min/Max | 0.5 | Alta |
+| Fase 4: Confronto ETF | 4 | Alta |
+| Fase 5: Testing | 1 | Alta |
+| Fase 6: Deploy | 0.5 | Media |
+| **TOTALE** | **8** | - |
 
 ---
 
-*Piano generato il 22 gennaio 2026*
+## Rischi e Mitigazioni
+
+| Rischio | Probabilita' | Impatto | Mitigazione |
+|---------|--------------|---------|-------------|
+| ETF non trovato su fonti esterne | Media | Alto | Prioritizzare ricerca nell'universo caricato |
+| Performance lenta ricerca esterna | Media | Medio | Cache risultati, progress bar |
+| Dati mancanti per alcuni periodi | Alta | Basso | Mostrare "N/A" invece di errore |
+| Streamlit Cloud timeout | Bassa | Alto | Limitare ricerche esterne, usare cache |
+
+---
+
+## Note Tecniche
+
+### Gestione ISIN ETF
+
+L'approccio consigliato e':
+
+1. **Prima**: Cercare l'ETF nell'universo caricato (veloce, dati consistenti)
+2. **Poi**: Se non trovato, cercare su fonti esterne (Morningstar, JustETF)
+3. **Fallback**: Mostrare errore se non trovato in nessuna fonte
+
+### Colorazione Tabella
+
+Streamlit supporta styling condizionale limitato. Opzioni:
+
+1. **Colonna "Status"**: Testo colorato (piu' semplice)
+2. **DataFrame Styling**: Usando `df.style.applymap()` (piu' complesso, compatibilita' limitata)
+3. **Aggrid**: Componente avanzato (richiede dipendenza aggiuntiva)
+
+Consigliato: Opzione 1 con emoji/icone per chiarezza visiva.
+
+---
+
+*Piano aggiornato il 22 gennaio 2026 sulla base del feedback di Massimo Zaffanella*
