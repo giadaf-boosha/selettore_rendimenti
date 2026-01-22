@@ -119,7 +119,7 @@ def get_alternate_row_fill() -> PatternFill:
     )
 
 
-# Larghezze colonne consigliate
+# Larghezze colonne consigliate (v3.0 con periodi estesi)
 COLUMN_WIDTHS = {
     'Nome': 45,
     'ISIN': 14,
@@ -129,12 +129,26 @@ COLUMN_WIDTHS = {
     'Distribuzione': 12,
     'Cat. Morningstar': 30,
     'Cat. Assogestioni': 30,
-    'Perf. YTD': 12,
-    'Perf. 1a': 12,
-    'Perf. 3a': 12,
-    'Perf. 5a': 12,
-    'Perf. 7a': 12,
-    'Perf. 10a': 12,
+    'Perf. 1m': 10,
+    'Perf. 3m': 10,
+    'Perf. 6m': 10,
+    'Perf. YTD': 10,
+    'Perf. 1a': 10,
+    'Perf. 3a': 10,
+    'Perf. 5a': 10,
+    'Perf. 7a': 10,
+    'Perf. 9a': 10,
+    'Perf. 10a': 10,
+    'Delta 1m': 10,
+    'Delta 3m': 10,
+    'Delta 6m': 10,
+    'Delta YTD': 10,
+    'Delta 1a': 10,
+    'Delta 3a': 10,
+    'Delta 5a': 10,
+    'Delta 7a': 10,
+    'Delta 9a': 10,
+    'Delta 10a': 10,
     'Volatilita\' 3a': 12,
     'Sharpe 3a': 10,
     'Fonti': 20,

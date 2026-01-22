@@ -122,12 +122,16 @@ class DataMerger:
         # Raccogli fonti
         sources = list(set(r.source for r in records))
 
-        # Merge performance (prendi il miglior dato disponibile)
+        # Merge performance (prendi il miglior dato disponibile) - v3.0 con periodi estesi
+        perf_1m = self._best_value([r.performance.return_1m for r in sorted_records])
+        perf_3m = self._best_value([r.performance.return_3m for r in sorted_records])
+        perf_6m = self._best_value([r.performance.return_6m for r in sorted_records])
         perf_ytd = self._best_value([r.performance.ytd for r in sorted_records])
         perf_1y = self._best_value([r.performance.return_1y for r in sorted_records])
         perf_3y = self._best_value([r.performance.return_3y for r in sorted_records])
         perf_5y = self._best_value([r.performance.return_5y for r in sorted_records])
         perf_7y = self._best_value([r.performance.return_7y for r in sorted_records])
+        perf_9y = self._best_value([r.performance.return_9y for r in sorted_records])
         perf_10y = self._best_value([r.performance.return_10y for r in sorted_records])
 
         # Merge metriche rischio
@@ -146,9 +150,10 @@ class DataMerger:
         # Determina tipo strumento migliore
         inst_type = self._best_instrument_type([r.instrument_type for r in sorted_records])
 
-        # Calcola data quality score
+        # Calcola data quality score (v3.0 con periodi estesi)
         quality = self._calculate_quality_score(
-            perf_ytd, perf_1y, perf_3y, perf_5y, perf_10y,
+            perf_1m, perf_3m, perf_6m, perf_ytd,
+            perf_1y, perf_3y, perf_5y, perf_7y, perf_9y, perf_10y,
             vol_3y, sharpe, cat_ms, len(sources)
         )
 
@@ -161,11 +166,15 @@ class DataMerger:
             distribution=distribution,
             category_morningstar=cat_ms,
             category_assogestioni=cat_ag,
+            perf_1m_eur=perf_1m,
+            perf_3m_eur=perf_3m,
+            perf_6m_eur=perf_6m,
             perf_ytd_eur=perf_ytd,
             perf_1y_eur=perf_1y,
             perf_3y_eur=perf_3y,
             perf_5y_eur=perf_5y,
             perf_7y_eur=perf_7y,
+            perf_9y_eur=perf_9y,
             perf_10y_eur=perf_10y,
             volatility_1y=vol_1y,
             volatility_3y=vol_3y,

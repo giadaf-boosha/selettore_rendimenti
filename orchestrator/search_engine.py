@@ -183,11 +183,15 @@ class SearchEngine:
             Lista filtrata
         """
         attr_map = {
+            "1m": "perf_1m_eur",
+            "3m": "perf_3m_eur",
+            "6m": "perf_6m_eur",
             "ytd": "perf_ytd_eur",
             "1y": "perf_1y_eur",
             "3y": "perf_3y_eur",
             "5y": "perf_5y_eur",
             "7y": "perf_7y_eur",
+            "9y": "perf_9y_eur",
             "10y": "perf_10y_eur",
         }
         attr = attr_map.get(period, "perf_3y_eur")

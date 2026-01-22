@@ -24,7 +24,7 @@ class AppConfig:
 
     # Generale
     app_name: str = "Selettore Rendimenti Fondi/ETF"
-    version: str = "1.0.0"
+    version: str = "3.0.0"
     debug: bool = os.getenv("DEBUG", "false").lower() == "true"
 
     # Logging
@@ -144,14 +144,50 @@ ASSOGESTIONI_CATEGORIES: List[str] = [
 # Valute supportate
 CURRENCIES: List[str] = ["EUR", "USD", "GBP", "CHF"]
 
-# Periodi performance
+# Periodi performance (estesi per v3.0)
 PERFORMANCE_PERIODS: Dict[str, str] = {
+    "1 mese": "1m",
+    "3 mesi": "3m",
+    "6 mesi": "6m",
     "YTD": "ytd",
     "1 anno": "1y",
     "3 anni": "3y",
     "5 anni": "5y",
     "7 anni": "7y",
+    "9 anni": "9y",
     "10 anni": "10y",
+}
+
+# Configurazione Universe Loader (v3.0)
+UNIVERSE_MAX_ISINS: int = 500
+UNIVERSE_ALLOWED_EXTENSIONS: List[str] = [".xlsx", ".xls"]
+
+# Mapping categorie Assogestioni -> Morningstar per confronto
+CATEGORY_MAPPING: Dict[str, List[str]] = {
+    "AZ. AMERICA": ["Azionari USA Large Cap Blend", "Azionari USA Large Cap Growth", "Azionari USA Large Cap Value"],
+    "AZ. AREA EURO": ["Azionari Europa Large Cap Blend", "Azionari Eurozona Large Cap"],
+    "AZ. EUROPA": ["Azionari Europa Large Cap Blend", "Azionari Europa Large Cap Growth", "Azionari Europa Large Cap Value"],
+    "AZ. INTERNAZIONALI": ["Azionari Globali Large Cap Blend", "Azionari Globali Large Cap Growth", "Azionari Globali Large Cap Value"],
+    "AZ. ITALIA": ["Azionari Italia"],
+    "AZ. PACIFICO": ["Azionari Asia-Pacifico ex-Giappone", "Azionari Giappone Large Cap"],
+    "AZ. PAESI EMERGENTI": ["Azionari Paesi Emergenti"],
+    "AZ. SETTORE TECNOLOGIA": ["Azionari Settore Tecnologia"],
+    "AZ. SALUTE": ["Azionari Settore Salute"],
+    "AZ. ENERGIA E MAT. PRIME": ["Azionari Settore Energia", "Azionari Settore Risorse Naturali"],
+    "BILANCIATI": ["Bilanciati EUR Moderati", "Bilanciati Globali"],
+    "BILANCIATI AZIONARI": ["Bilanciati EUR Aggressivi"],
+    "BILANCIATI OBBLIGAZIONARI": ["Bilanciati EUR Prudenti"],
+    "FLESSIBILI": ["Flessibili EUR", "Flessibili Globali"],
+    "OBBL. EURO CORPORATE INV. GRADE": ["Obbligazionari EUR Corporate"],
+    "OBBL. EURO GOV. BREVE TERMINE": ["Obbligazionari EUR Governativi"],
+    "OBBL. EURO GOV. M/L TERMINE": ["Obbligazionari EUR Governativi", "Obbligazionari EUR Diversificati"],
+    "OBBL. EURO HIGH YIELD": ["Obbligazionari EUR High Yield"],
+    "OBBL. EURO MISTI": ["Obbligazionari EUR Diversificati"],
+    "OBBL. INTERNAZIONALI": ["Obbligazionari Globali"],
+    "OBBL. INTERNAZIONALI GOV.": ["Obbligazionari Globali"],
+    "OBBL. INTERNAZIONALI CORPORATE": ["Obbligazionari USD Corporate"],
+    "OBBL. PAESI EMERGENTI": ["Obbligazionari Mercati Emergenti"],
+    "FONDI DI LIQUIDITA' AREA EURO": ["Monetari EUR"],
 }
 
 # Istanza configurazione globale

@@ -40,7 +40,7 @@ class ExcelWriter:
     - Fonte dati
     """
 
-    # Colonne da includere nel file
+    # Colonne da includere nel file (v3.0 con periodi estesi)
     COLUMNS = [
         ("Nome", 45),
         ("ISIN", 14),
@@ -49,17 +49,21 @@ class ExcelWriter:
         ("Distribuzione", 12),
         ("Cat. Morningstar", 30),
         ("Cat. Assogestioni", 30),
-        ("Perf. YTD", 12),
-        ("Perf. 1a", 12),
-        ("Perf. 3a", 12),
-        ("Perf. 5a", 12),
-        ("Perf. 7a", 12),
-        ("Perf. 10a", 12),
+        ("Perf. 1m", 10),
+        ("Perf. 3m", 10),
+        ("Perf. 6m", 10),
+        ("Perf. YTD", 10),
+        ("Perf. 1a", 10),
+        ("Perf. 3a", 10),
+        ("Perf. 5a", 10),
+        ("Perf. 7a", 10),
+        ("Perf. 9a", 10),
+        ("Perf. 10a", 10),
         ("Fonti", 20),
     ]
 
     # Indici colonne performance (0-based, relativo a COLUMNS)
-    PERF_COLUMNS = [7, 8, 9, 10, 11, 12]
+    PERF_COLUMNS = [7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
 
     def __init__(self):
         """Inizializza l'Excel writer."""
@@ -142,13 +146,17 @@ class ExcelWriter:
             # Categoria Assogestioni
             ws.cell(row=row_idx, column=7, value=inst.category_assogestioni or "")
 
-            # Performance con formato percentuale
+            # Performance con formato percentuale (v3.0 con periodi estesi)
             perf_values = [
+                inst.perf_1m_eur,
+                inst.perf_3m_eur,
+                inst.perf_6m_eur,
                 inst.perf_ytd_eur,
                 inst.perf_1y_eur,
                 inst.perf_3y_eur,
                 inst.perf_5y_eur,
                 inst.perf_7y_eur,
+                inst.perf_9y_eur,
                 inst.perf_10y_eur,
             ]
 
@@ -164,7 +172,7 @@ class ExcelWriter:
                     cell.value = ""
 
             # Fonti
-            ws.cell(row=row_idx, column=14, value=", ".join(inst.sources))
+            ws.cell(row=row_idx, column=18, value=", ".join(inst.sources))
 
     def _apply_formatting(self, ws, row_count: int) -> None:
         """Applica formattazione alle righe dati."""
@@ -274,11 +282,15 @@ def instruments_to_dataframe(instruments: List[AggregatedInstrument]) -> pd.Data
             "Distribuzione": inst.distribution.value,
             "Cat. Morningstar": inst.category_morningstar or "",
             "Cat. Assogestioni": inst.category_assogestioni or "",
+            "Perf. 1m": inst.perf_1m_eur,
+            "Perf. 3m": inst.perf_3m_eur,
+            "Perf. 6m": inst.perf_6m_eur,
             "Perf. YTD": inst.perf_ytd_eur,
             "Perf. 1a": inst.perf_1y_eur,
             "Perf. 3a": inst.perf_3y_eur,
             "Perf. 5a": inst.perf_5y_eur,
             "Perf. 7a": inst.perf_7y_eur,
+            "Perf. 9a": inst.perf_9y_eur,
             "Perf. 10a": inst.perf_10y_eur,
             "Volatilita' 3a": inst.volatility_3y,
             "Sharpe 3a": inst.sharpe_ratio_3y,

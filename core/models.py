@@ -30,21 +30,29 @@ class DistributionPolicy(Enum):
 @dataclass
 class PerformanceData:
     """Performance su diversi orizzonti temporali (in percentuale)."""
+    return_1m: Optional[float] = None   # v3.0: 1 mese
+    return_3m: Optional[float] = None   # v3.0: 3 mesi
+    return_6m: Optional[float] = None   # v3.0: 6 mesi
     ytd: Optional[float] = None
     return_1y: Optional[float] = None
     return_3y: Optional[float] = None
     return_5y: Optional[float] = None
     return_7y: Optional[float] = None
+    return_9y: Optional[float] = None   # v3.0: 9 anni
     return_10y: Optional[float] = None
 
     def get_by_period(self, period: str) -> Optional[float]:
         """Restituisce la performance per il periodo specificato."""
         mapping = {
+            "1m": self.return_1m,
+            "3m": self.return_3m,
+            "6m": self.return_6m,
             "ytd": self.ytd,
             "1y": self.return_1y,
             "3y": self.return_3y,
             "5y": self.return_5y,
             "7y": self.return_7y,
+            "9y": self.return_9y,
             "10y": self.return_10y,
         }
         return mapping.get(period)
@@ -115,12 +123,16 @@ class AggregatedInstrument:
     category_morningstar: Optional[str] = None
     category_assogestioni: Optional[str] = None
 
-    # Performance in EUR
+    # Performance in EUR (estese v3.0)
+    perf_1m_eur: Optional[float] = None   # v3.0: 1 mese
+    perf_3m_eur: Optional[float] = None   # v3.0: 3 mesi
+    perf_6m_eur: Optional[float] = None   # v3.0: 6 mesi
     perf_ytd_eur: Optional[float] = None
     perf_1y_eur: Optional[float] = None
     perf_3y_eur: Optional[float] = None
     perf_5y_eur: Optional[float] = None
     perf_7y_eur: Optional[float] = None
+    perf_9y_eur: Optional[float] = None   # v3.0: 9 anni
     perf_10y_eur: Optional[float] = None
 
     # Metriche rischio
@@ -136,11 +148,15 @@ class AggregatedInstrument:
     def get_performance_by_period(self, period: str) -> Optional[float]:
         """Restituisce la performance per il periodo specificato."""
         mapping = {
+            "1m": self.perf_1m_eur,
+            "3m": self.perf_3m_eur,
+            "6m": self.perf_6m_eur,
             "ytd": self.perf_ytd_eur,
             "1y": self.perf_1y_eur,
             "3y": self.perf_3y_eur,
             "5y": self.perf_5y_eur,
             "7y": self.perf_7y_eur,
+            "9y": self.perf_9y_eur,
             "10y": self.perf_10y_eur,
         }
         return mapping.get(period)
@@ -156,11 +172,15 @@ class AggregatedInstrument:
             "Distribuzione": self.distribution.value,
             "Cat. Morningstar": self.category_morningstar or "",
             "Cat. Assogestioni": self.category_assogestioni or "",
+            "Perf. 1m": self.perf_1m_eur,
+            "Perf. 3m": self.perf_3m_eur,
+            "Perf. 6m": self.perf_6m_eur,
             "Perf. YTD": self.perf_ytd_eur,
             "Perf. 1a": self.perf_1y_eur,
             "Perf. 3a": self.perf_3y_eur,
             "Perf. 5a": self.perf_5y_eur,
             "Perf. 7a": self.perf_7y_eur,
+            "Perf. 9a": self.perf_9y_eur,
             "Perf. 10a": self.perf_10y_eur,
             "Volatilita' 3a": self.volatility_3y,
             "Sharpe 3a": self.sharpe_ratio_3y,
@@ -202,3 +222,204 @@ class SearchCriteria:
     def has_category_filter(self) -> bool:
         """Verifica se sono stati specificati filtri per categoria."""
         return bool(self.categories_morningstar or self.categories_assogestioni)
+
+
+# =============================================================================
+# MODELLI v3.0 - Universo Fondi e Confronto
+# =============================================================================
+
+@dataclass
+class UniverseInstrument:
+    """
+    Strumento caricato dall'universo utente (file Excel).
+
+    Rappresenta un fondo/strumento che l'utente ha nel proprio portafoglio
+    e che vuole confrontare con gli ETF di mercato.
+    """
+    isin: str
+    name: Optional[str] = None
+    category: Optional[str] = None
+    notes: Optional[str] = None
+    source_row: int = 0  # Riga nel file Excel originale
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Converte in dizionario."""
+        return {
+            "ISIN": self.isin,
+            "Nome": self.name or "",
+            "Categoria": self.category or "",
+            "Note": self.notes or "",
+        }
+
+
+@dataclass
+class UniverseLoadResult:
+    """
+    Risultato del caricamento dell'universo fondi.
+
+    Contiene sia gli strumenti validi che gli eventuali errori
+    riscontrati durante il parsing del file Excel.
+    """
+    instruments: List[UniverseInstrument] = field(default_factory=list)
+    errors: List[str] = field(default_factory=list)
+    warnings: List[str] = field(default_factory=list)
+    total_rows: int = 0
+    valid_count: int = 0
+    invalid_count: int = 0
+
+    @property
+    def success(self) -> bool:
+        """True se il caricamento ha prodotto almeno uno strumento valido."""
+        return self.valid_count > 0 and len(self.errors) == 0
+
+
+@dataclass
+class ComparisonResult:
+    """
+    Risultato confronto singolo strumento.
+
+    Contiene i dati aggregati dello strumento più i delta
+    di performance rispetto al benchmark (ETF).
+    """
+    instrument: 'AggregatedInstrument'
+    origin: str  # "universe" o "market"
+    benchmark_isin: Optional[str] = None
+    delta_1m: Optional[float] = None
+    delta_3m: Optional[float] = None
+    delta_6m: Optional[float] = None
+    delta_ytd: Optional[float] = None
+    delta_1y: Optional[float] = None
+    delta_3y: Optional[float] = None
+    delta_5y: Optional[float] = None
+    delta_7y: Optional[float] = None
+    delta_9y: Optional[float] = None
+    delta_10y: Optional[float] = None
+
+    def get_delta_by_period(self, period: str) -> Optional[float]:
+        """Restituisce il delta per il periodo specificato."""
+        mapping = {
+            "1m": self.delta_1m,
+            "3m": self.delta_3m,
+            "6m": self.delta_6m,
+            "ytd": self.delta_ytd,
+            "1y": self.delta_1y,
+            "3y": self.delta_3y,
+            "5y": self.delta_5y,
+            "7y": self.delta_7y,
+            "9y": self.delta_9y,
+            "10y": self.delta_10y,
+        }
+        return mapping.get(period)
+
+    def is_outperformer(self, period: str = "3y", threshold: float = 0.5) -> Optional[bool]:
+        """
+        Verifica se lo strumento ha outperformato il benchmark.
+
+        Args:
+            period: Periodo di riferimento
+            threshold: Soglia minima per considerare outperformance
+
+        Returns:
+            True se outperformer, False se underperformer, None se dati non disponibili
+        """
+        delta = self.get_delta_by_period(period)
+        if delta is None:
+            return None
+        return delta > threshold
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Converte in dizionario per DataFrame."""
+        base = self.instrument.to_dict()
+        base["Origine"] = self.origin
+        base["Delta 1m"] = self.delta_1m
+        base["Delta 3m"] = self.delta_3m
+        base["Delta 6m"] = self.delta_6m
+        base["Delta YTD"] = self.delta_ytd
+        base["Delta 1a"] = self.delta_1y
+        base["Delta 3a"] = self.delta_3y
+        base["Delta 5a"] = self.delta_5y
+        base["Delta 7a"] = self.delta_7y
+        base["Delta 9a"] = self.delta_9y
+        base["Delta 10a"] = self.delta_10y
+        return base
+
+
+@dataclass
+class ComparisonReport:
+    """
+    Report completo del confronto.
+
+    Contiene tutti i risultati del confronto più statistiche aggregate.
+    """
+    # Metadata
+    comparison_type: str  # "universe_vs_etf" o "etf_vs_universe"
+    category: Optional[str] = None
+    category_type: Optional[str] = None  # "morningstar" o "assogestioni"
+    benchmark_etf: Optional['AggregatedInstrument'] = None
+    periods_analyzed: List[str] = field(default_factory=list)
+    generated_at: datetime = field(default_factory=datetime.now)
+
+    # Risultati
+    results: List[ComparisonResult] = field(default_factory=list)
+
+    # Statistiche
+    total_instruments: int = 0
+    universe_count: int = 0
+    market_count: int = 0
+    outperformers_count: int = 0
+    underperformers_count: int = 0
+    avg_delta: Dict[str, float] = field(default_factory=dict)
+    best_performer: Optional[ComparisonResult] = None
+    worst_performer: Optional[ComparisonResult] = None
+
+    def calculate_statistics(self, reference_period: str = "3y") -> None:
+        """
+        Calcola le statistiche aggregate dai risultati.
+
+        Args:
+            reference_period: Periodo di riferimento per outperformer/underperformer
+        """
+        if not self.results:
+            return
+
+        self.total_instruments = len(self.results)
+        self.universe_count = sum(1 for r in self.results if r.origin == "universe")
+        self.market_count = sum(1 for r in self.results if r.origin == "market")
+
+        # Calcola outperformer/underperformer
+        universe_results = [r for r in self.results if r.origin == "universe"]
+        self.outperformers_count = sum(
+            1 for r in universe_results
+            if r.is_outperformer(reference_period, threshold=0.5) is True
+        )
+        self.underperformers_count = sum(
+            1 for r in universe_results
+            if r.is_outperformer(reference_period, threshold=-0.5) is False
+        )
+
+        # Calcola media delta per ogni periodo
+        periods = ["1m", "3m", "6m", "ytd", "1y", "3y", "5y", "7y", "9y", "10y"]
+        for period in periods:
+            deltas: List[float] = [
+                d for d in (r.get_delta_by_period(period) for r in universe_results)
+                if d is not None
+            ]
+            if deltas:
+                self.avg_delta[period] = sum(deltas) / len(deltas)
+
+        # Trova best/worst performer
+        ref_deltas: List[tuple] = [
+            (r, r.get_delta_by_period(reference_period))
+            for r in universe_results
+            if r.get_delta_by_period(reference_period) is not None
+        ]
+        if ref_deltas:
+            ref_deltas.sort(key=lambda x: x[1] if x[1] is not None else 0.0, reverse=True)
+            self.best_performer = ref_deltas[0][0]
+            self.worst_performer = ref_deltas[-1][0]
+
+    def to_dataframe(self):
+        """Converte i risultati in DataFrame pandas."""
+        import pandas as pd
+        data = [r.to_dict() for r in self.results]
+        return pd.DataFrame(data)
