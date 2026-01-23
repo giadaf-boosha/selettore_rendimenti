@@ -36,9 +36,29 @@ def find_etf_in_universe(
     return None
 
 
+def _has_useful_performance(result) -> bool:
+    """
+    Verifica se il risultato ha almeno una performance utile (1y, 3y o 5y).
+
+    Questo evita di accettare risultati che hanno solo metadati ma nessuna
+    performance, permettendo di provare altre fonti.
+    """
+    if not result or not result.performance:
+        return False
+    perf = result.performance
+    return any([
+        perf.return_1y is not None,
+        perf.return_3y is not None,
+        perf.return_5y is not None,
+    ])
+
+
 def get_etf_from_external_sources(isin: str) -> Optional[dict]:
     """
     Recupera dati ETF da fonti esterne (Morningstar, JustETF).
+
+    Priorità: JustETF (dati più completi per ETF) > Morningstar.
+    Se una fonte non ha performance utili, prova la successiva.
 
     Args:
         isin: ISIN dell'ETF
@@ -46,37 +66,13 @@ def get_etf_from_external_sources(isin: str) -> Optional[dict]:
     Returns:
         Dict con dati ETF o None se non trovato
     """
-    # Prova Morningstar
-    try:
-        from scrapers.morningstar_scraper import MorningstarScraper
-        scraper = MorningstarScraper()
-        result = scraper.get_by_isin(isin)
-        if result:
-            logger.info(f"ETF {isin} trovato su Morningstar")
-            return {
-                "name": result.name,
-                "category_morningstar": result.category_morningstar,
-                "perf_ytd_eur": result.performance.ytd,
-                "perf_1m_eur": result.performance.return_1m,
-                "perf_3m_eur": result.performance.return_3m,
-                "perf_6m_eur": result.performance.return_6m,
-                "perf_1y_eur": result.performance.return_1y,
-                "perf_3y_eur": result.performance.return_3y,
-                "perf_5y_eur": result.performance.return_5y,
-                "perf_7y_eur": result.performance.return_7y,
-                "perf_9y_eur": result.performance.return_9y,
-                "perf_10y_eur": result.performance.return_10y,
-            }
-    except Exception as e:
-        logger.warning(f"Morningstar search failed for {isin}: {e}")
-
-    # Prova JustETF
+    # Prova prima JustETF (fonte primaria per ETF con dati più completi)
     try:
         from scrapers.justetf_scraper import JustETFScraper
         scraper = JustETFScraper()
         result = scraper.get_by_isin(isin)
-        if result:
-            logger.info(f"ETF {isin} trovato su JustETF")
+        if result and _has_useful_performance(result):
+            logger.info(f"ETF {isin} trovato su JustETF con performance")
             return {
                 "name": result.name,
                 "category_morningstar": result.category_morningstar,
@@ -91,8 +87,36 @@ def get_etf_from_external_sources(isin: str) -> Optional[dict]:
                 "perf_9y_eur": result.performance.return_9y,
                 "perf_10y_eur": result.performance.return_10y,
             }
+        elif result:
+            logger.info(f"ETF {isin} trovato su JustETF ma senza performance utili")
     except Exception as e:
         logger.warning(f"JustETF search failed for {isin}: {e}")
+
+    # Fallback a Morningstar
+    try:
+        from scrapers.morningstar_scraper import MorningstarScraper
+        scraper = MorningstarScraper()
+        result = scraper.get_by_isin(isin)
+        if result and _has_useful_performance(result):
+            logger.info(f"ETF {isin} trovato su Morningstar con performance")
+            return {
+                "name": result.name,
+                "category_morningstar": result.category_morningstar,
+                "perf_ytd_eur": result.performance.ytd,
+                "perf_1m_eur": result.performance.return_1m,
+                "perf_3m_eur": result.performance.return_3m,
+                "perf_6m_eur": result.performance.return_6m,
+                "perf_1y_eur": result.performance.return_1y,
+                "perf_3y_eur": result.performance.return_3y,
+                "perf_5y_eur": result.performance.return_5y,
+                "perf_7y_eur": result.performance.return_7y,
+                "perf_9y_eur": result.performance.return_9y,
+                "perf_10y_eur": result.performance.return_10y,
+            }
+        elif result:
+            logger.info(f"ETF {isin} trovato su Morningstar ma senza performance utili")
+    except Exception as e:
+        logger.warning(f"Morningstar search failed for {isin}: {e}")
 
     return None
 

@@ -101,6 +101,19 @@ class MorningstarScraper(BaseDataSource):
             return InstrumentType.FUND
         return InstrumentType.UNKNOWN
 
+    def _normalize_performance(self, value) -> Optional[float]:
+        """
+        Normalizza il valore di performance da percentuale a decimale.
+
+        Morningstar restituisce le performance in formato percentuale (es. 5.93 = 5.93%).
+        Il sistema interno usa formato decimale (es. 0.0593 = 5.93%).
+        Questa funzione divide per 100 per convertire.
+        """
+        val = safe_float(value)
+        if val is not None:
+            return val / 100.0
+        return None
+
     def _extract_performance_from_trailing(
         self, trailing_data: dict, column_defs: list
     ) -> PerformanceData:
@@ -113,11 +126,12 @@ class MorningstarScraper(BaseDataSource):
         # Mappa colonne a valori
         col_to_val = dict(zip(column_defs, trailing_data))
 
-        perf.ytd = safe_float(col_to_val.get("YearToDate"))
-        perf.return_1y = safe_float(col_to_val.get("1Year"))
-        perf.return_3y = safe_float(col_to_val.get("3Year"))
-        perf.return_5y = safe_float(col_to_val.get("5Year"))
-        perf.return_10y = safe_float(col_to_val.get("10Year"))
+        # Normalizza performance da % a decimale (Morningstar restituisce %)
+        perf.ytd = self._normalize_performance(col_to_val.get("YearToDate"))
+        perf.return_1y = self._normalize_performance(col_to_val.get("1Year"))
+        perf.return_3y = self._normalize_performance(col_to_val.get("3Year"))
+        perf.return_5y = self._normalize_performance(col_to_val.get("5Year"))
+        perf.return_10y = self._normalize_performance(col_to_val.get("10Year"))
 
         return perf
 

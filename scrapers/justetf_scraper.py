@@ -99,6 +99,19 @@ class JustETFScraper(BaseDataSource):
             return DistributionPolicy.DISTRIBUTING
         return DistributionPolicy.UNKNOWN
 
+    def _normalize_performance(self, value) -> Optional[float]:
+        """
+        Normalizza il valore di performance da percentuale a decimale.
+
+        JustETF restituisce le performance in formato percentuale (es. 5.93 = 5.93%).
+        Il sistema interno usa formato decimale (es. 0.0593 = 5.93%).
+        Questa funzione divide per 100 per convertire.
+        """
+        val = safe_float(value)
+        if val is not None:
+            return val / 100.0
+        return None
+
     def _row_to_record(self, row: pd.Series) -> SourceRecord:
         """Converte una riga DataFrame in SourceRecord."""
         inception = None
@@ -125,10 +138,11 @@ class JustETFScraper(BaseDataSource):
             aum=safe_float(row.get("size")),  # "size" non "fund_size"
             inception_date=inception,
             performance=PerformanceData(
-                ytd=safe_float(row.get("last_six_months")),  # YTD approssimato con 6 mesi
-                return_1y=safe_float(row.get("last_year")),
-                return_3y=safe_float(row.get("last_three_years")),
-                return_5y=safe_float(row.get("last_five_years")),
+                # Normalizza performance da % a decimale (JustETF restituisce %)
+                ytd=self._normalize_performance(row.get("last_six_months")),
+                return_1y=self._normalize_performance(row.get("last_year")),
+                return_3y=self._normalize_performance(row.get("last_three_years")),
+                return_5y=self._normalize_performance(row.get("last_five_years")),
                 return_10y=None,  # JustETF non fornisce 10y direttamente
             ),
             risk=RiskMetrics(
