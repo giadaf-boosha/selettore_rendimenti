@@ -233,22 +233,30 @@ class UniverseLoader:
                 return None
             return self._safe_float(row.get(column_map[attr]))
 
+        def get_perf(attr: str) -> Optional[float]:
+            """Get performance con normalizzazione automatica."""
+            if attr not in column_map:
+                return None
+            return self._safe_performance(row.get(column_map[attr]))
+
         return UniverseInstrument(
             isin=isin,
             name=get_str("name"),
             category_morningstar=get_str("category_morningstar"),
             category_sfdr=get_str("category_sfdr"),
-            perf_ytd=get_float("perf_ytd"),
-            perf_1m=get_float("perf_1m"),
-            perf_3m=get_float("perf_3m"),
-            perf_6m=get_float("perf_6m"),
-            perf_1y=get_float("perf_1y"),
-            perf_3y=get_float("perf_3y"),
-            perf_5y=get_float("perf_5y"),
-            perf_7y=get_float("perf_7y"),
-            perf_9y=get_float("perf_9y"),
-            perf_10y=get_float("perf_10y"),
-            perf_custom=get_float("perf_custom"),
+            # Performance: usa get_perf per normalizzazione automatica
+            perf_ytd=get_perf("perf_ytd"),
+            perf_1m=get_perf("perf_1m"),
+            perf_3m=get_perf("perf_3m"),
+            perf_6m=get_perf("perf_6m"),
+            perf_1y=get_perf("perf_1y"),
+            perf_3y=get_perf("perf_3y"),
+            perf_5y=get_perf("perf_5y"),
+            perf_7y=get_perf("perf_7y"),
+            perf_9y=get_perf("perf_9y"),
+            perf_10y=get_perf("perf_10y"),
+            perf_custom=get_perf("perf_custom"),
+            # Altri campi: usa get_float senza normalizzazione
             ter=get_float("ter"),
             var_3m=get_float("var_3m"),
             market_price_5y=get_float("market_price_5y"),
@@ -351,6 +359,34 @@ class UniverseLoader:
             except ValueError:
                 return None
         return None
+
+    def _safe_performance(self, value: Any) -> Optional[float]:
+        """
+        Converte e normalizza valore di performance.
+
+        Gestisce il caso in cui i file Excel possono avere performance in
+        formati diversi:
+        - Formato decimale: 0.1920 = 19.20%
+        - Formato percentuale: 19.20 = 19.20%
+
+        La normalizzazione converte tutto in formato decimale:
+        - Se |valore| > 10, assume formato percentuale e divide per 100
+        - Altrimenti assume formato decimale e lascia invariato
+
+        Soglia 10 scelta perché:
+        - Performance >1000% (come decimale >10) sono estremamente rare
+        - Performance 10-1000% come decimale (1.0-10.0) sono ragionevoli
+        - Valori >10 sono quasi certamente già in formato percentuale
+        """
+        val = self._safe_float(value)
+        if val is None:
+            return None
+
+        # Normalizza: se |valore| > 10, assumi formato percentuale
+        if abs(val) > 10:
+            return val / 100.0
+
+        return val
 
     def _get_extension(self, filename: str) -> str:
         """Estrae l'estensione dal nome file."""
