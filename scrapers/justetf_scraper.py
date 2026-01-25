@@ -112,6 +112,11 @@ class JustETFScraper(BaseDataSource):
             return val / 100.0
         return None
 
+    def _get_ytd_column(self) -> str:
+        """Restituisce il nome della colonna YTD per l'anno corrente."""
+        from datetime import datetime
+        return str(datetime.now().year)
+
     def _row_to_record(self, row: pd.Series) -> SourceRecord:
         """Converte una riga DataFrame in SourceRecord."""
         inception = None
@@ -123,6 +128,9 @@ class JustETFScraper(BaseDataSource):
 
         # ISIN è l'indice del DataFrame, non una colonna
         isin = str(row.name) if hasattr(row, 'name') else ""
+
+        # Colonna YTD è l'anno corrente (es. "2025", "2026")
+        ytd_col = self._get_ytd_column()
 
         return SourceRecord(
             isin=isin,
@@ -139,7 +147,11 @@ class JustETFScraper(BaseDataSource):
             inception_date=inception,
             performance=PerformanceData(
                 # Normalizza performance da % a decimale (JustETF restituisce %)
-                ytd=self._normalize_performance(row.get("last_six_months")),
+                # Mapping corretto: colonne JustETF → campi PerformanceData
+                return_1m=self._normalize_performance(row.get("last_month")),
+                return_3m=self._normalize_performance(row.get("last_three_months")),
+                return_6m=self._normalize_performance(row.get("last_six_months")),
+                ytd=self._normalize_performance(row.get(ytd_col)),  # Anno corrente (es. "2025")
                 return_1y=self._normalize_performance(row.get("last_year")),
                 return_3y=self._normalize_performance(row.get("last_three_years")),
                 return_5y=self._normalize_performance(row.get("last_five_years")),
@@ -157,12 +169,17 @@ class JustETFScraper(BaseDataSource):
 
     def _get_perf_column(self, period: str) -> str:
         """Mappa periodo al nome colonna JustETF."""
+        # Colonna YTD è l'anno corrente (es. "2025", "2026")
+        ytd_col = self._get_ytd_column()
         mapping = {
-            "ytd": "last_six_months",  # YTD approssimato
+            "1m": "last_month",
+            "3m": "last_three_months",
+            "6m": "last_six_months",
+            "ytd": ytd_col,  # Anno corrente dinamico
             "1y": "last_year",
             "3y": "last_three_years",
             "5y": "last_five_years",
-            "10y": "last_five_years",  # Fallback a 5y
+            "10y": "last_five_years",  # Fallback a 5y (JustETF non fornisce 10y)
         }
         return mapping.get(period, "last_three_years")
 

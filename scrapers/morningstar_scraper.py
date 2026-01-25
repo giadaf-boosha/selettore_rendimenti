@@ -127,6 +127,10 @@ class MorningstarScraper(BaseDataSource):
         col_to_val = dict(zip(column_defs, trailing_data))
 
         # Normalizza performance da % a decimale (Morningstar restituisce %)
+        # Mapping completo: colonne Morningstar → campi PerformanceData
+        perf.return_1m = self._normalize_performance(col_to_val.get("1Month"))
+        perf.return_3m = self._normalize_performance(col_to_val.get("3Month"))
+        perf.return_6m = self._normalize_performance(col_to_val.get("6Month"))  # Se disponibile
         perf.ytd = self._normalize_performance(col_to_val.get("YearToDate"))
         perf.return_1y = self._normalize_performance(col_to_val.get("1Year"))
         perf.return_3y = self._normalize_performance(col_to_val.get("3Year"))
