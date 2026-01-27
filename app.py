@@ -1,19 +1,20 @@
 """
-Selettore Automatico Rendimenti Fondi/ETF v4.0
+Selettore Automatico Rendimenti Fondi/ETF v4.1
 
 Web application Streamlit per l'analisi e il ranking di fondi comuni
 a partire da file Excel con dati di performance completi.
 
-Funzionalita' v4.0:
+Funzionalita' v4.1:
 - Upload Universo Fondi da Excel (formato completo con performance)
 - Selezione MULTIPLA categorie Morningstar
 - Confronto con ETF benchmark (chi batte l'ETF?)
 - Ranking per periodo di performance
 - Export risultati in Excel
+- Pre-caricamento database ETF (4000+ ETF) per ricerche istantanee
 
 Autore: Boosha AI
 Cliente: Massimo Zaffanella - Consulente Finanziario
-Versione: 4.0.0
+Versione: 4.1.0
 """
 # IMPORTANT: Import http_config FIRST to patch requests library
 # This adds realistic User-Agent headers to avoid bot detection
@@ -55,7 +56,7 @@ logger = logging.getLogger(__name__)
 # ============================================================================
 
 st.set_page_config(
-    page_title="Selettore Rendimenti Fondi/ETF v4.0",
+    page_title="Selettore Rendimenti Fondi/ETF v4.1",
     page_icon="📊",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -85,6 +86,10 @@ def init_session_state():
         'comparison_done': False,
         # Modalita' attiva
         'active_mode': 'esplora',
+        # Stato database ETF (per pre-caricamento)
+        'etf_db_ready': False,
+        'etf_db_loaded_at': None,
+        'etf_db_count': 0,
     }
 
     for key, default_value in defaults.items():
@@ -103,6 +108,65 @@ init_session_state()
 def get_universe_loader():
     """Restituisce istanza cached dell'universe loader."""
     return UniverseLoader()
+
+
+@st.cache_resource
+def get_justetf_scraper():
+    """Restituisce istanza cached del JustETF scraper."""
+    from scrapers.justetf_scraper import JustETFScraper
+    return JustETFScraper()
+
+
+def check_etf_database_status():
+    """
+    Verifica lo stato del database ETF (cache JustETF).
+
+    Returns:
+        dict con: ready (bool), count (int), expires_in_minutes (int o None)
+    """
+    from time import time
+    scraper = get_justetf_scraper()
+
+    if scraper._overview_cache is not None and scraper._cache_timestamp:
+        elapsed = time() - scraper._cache_timestamp
+        remaining = scraper._cache_ttl - elapsed
+
+        if remaining > 0:
+            return {
+                'ready': True,
+                'count': len(scraper._overview_cache),
+                'expires_in_minutes': int(remaining / 60),
+            }
+
+    return {
+        'ready': False,
+        'count': 0,
+        'expires_in_minutes': None,
+    }
+
+
+def preload_etf_database():
+    """
+    Pre-carica il database JustETF.
+
+    Returns:
+        int: Numero di ETF caricati, 0 se errore
+    """
+    from time import time
+    try:
+        scraper = get_justetf_scraper()
+        df = scraper._get_overview(force_refresh=False)
+
+        # Aggiorna session state
+        st.session_state.etf_db_ready = True
+        st.session_state.etf_db_loaded_at = time()
+        st.session_state.etf_db_count = len(df)
+
+        return len(df)
+    except Exception as e:
+        logger.error(f"Failed to preload ETF database: {e}")
+        st.session_state.etf_db_ready = False
+        return 0
 
 
 def load_universe(uploaded_file):
@@ -376,6 +440,41 @@ with st.sidebar:
     st.divider()
 
     # =====================================
+    # SEZIONE PRE-CARICAMENTO DATABASE ETF
+    # =====================================
+    st.subheader("📦 Database ETF")
+
+    db_status = check_etf_database_status()
+
+    if db_status['ready']:
+        st.success(
+            f"✅ Pronto ({db_status['count']} ETF)\n"
+            f"⏱️ Scade tra {db_status['expires_in_minutes']} min"
+        )
+    else:
+        st.warning(
+            "⚠️ Database non caricato\n"
+            "Caricalo prima di confrontare ETF esterni"
+        )
+
+    # Pulsante per pre-caricare
+    if st.button(
+        "🔄 CARICA DATABASE ETF" if not db_status['ready'] else "🔄 AGGIORNA DATABASE",
+        use_container_width=True,
+        help="Scarica i dati di 4000+ ETF da JustETF (1-2 minuti). "
+             "Una volta caricato, le ricerche saranno istantanee per 1 ora."
+    ):
+        with st.spinner("⏳ Caricamento database ETF in corso... (1-2 minuti)"):
+            count = preload_etf_database()
+            if count > 0:
+                st.success(f"✅ Database caricato: {count} ETF disponibili!")
+                st.rerun()
+            else:
+                st.error("❌ Errore nel caricamento del database")
+
+    st.divider()
+
+    # =====================================
     # FILTRI (solo se universo caricato)
     # =====================================
     selected_categories = []
@@ -600,8 +699,28 @@ else:
         if not etf_isin_input:
             st.warning("⚠️ Inserisci l'ISIN dell'ETF benchmark")
         else:
+            # Verifica se l'ETF è nell'universo
+            etf_in_universe = any(
+                inst.isin.upper() == etf_isin_input.strip().upper()
+                for inst in st.session_state.universe_instruments
+            )
+
+            # Se non è nell'universo e database non pronto, avvisa
+            db_status = check_etf_database_status()
+            if not etf_in_universe and not db_status['ready']:
+                st.info(
+                    "ℹ️ L'ETF non è nel tuo universo. "
+                    "Caricamento database esterno in corso (1-2 min)..."
+                )
+
             # Recupera ETF
-            with st.spinner("🔍 Ricerca dati ETF..."):
+            spinner_msg = (
+                "🔍 Ricerca dati ETF..."
+                if etf_in_universe or db_status['ready']
+                else "⏳ Caricamento database ETF esterno (1-2 min)..."
+            )
+
+            with st.spinner(spinner_msg):
                 # Cerca nell'universo completo (non solo i filtrati)
                 etf = get_etf_benchmark(
                     etf_isin_input,
