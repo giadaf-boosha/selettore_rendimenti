@@ -406,7 +406,7 @@ with st.sidebar:
         "ISIN ETF da pre-caricare",
         placeholder="Inserisci gli ISIN (uno per riga o separati da virgola):\nIE00B5BMR087\nLU1900068328\nIE00B4L5Y983",
         height=100,
-        help="Inserisci fino a 15 ISIN di ETF. Verranno scaricati e cachati per 1 ora."
+        help="Inserisci fino a 15 ISIN di ETF. Verranno scaricati e cachati per 24 ore."
     )
 
     # Pulsante per pre-caricare
@@ -415,7 +415,7 @@ with st.sidebar:
         use_container_width=True,
         type="primary",
         help="Scarica i dati degli ETF inseriti (~2-3 sec per ETF). "
-             "Le ricerche successive saranno istantanee per 1 ora."
+             "Le ricerche successive saranno istantanee per 24 ore."
     ):
         if not etf_isins_input.strip():
             st.warning("⚠️ Inserisci almeno un ISIN")

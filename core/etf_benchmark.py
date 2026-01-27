@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 # Cache locale per ETF pre-caricati
 # Struttura: {isin: {'data': UniverseInstrument, 'timestamp': float}}
 _etf_cache: Dict[str, dict] = {}
-_cache_ttl: int = 3600  # 1 ora
+_cache_ttl: int = 86400  # 24 ore
 
 
 def get_etf_cache_status() -> dict:
