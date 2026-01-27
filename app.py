@@ -42,7 +42,7 @@ from core.universe_loader import (
     group_by_category,
     rank_by_performance,
 )
-from core.etf_benchmark import get_etf_benchmark
+from core.etf_benchmark import get_etf_benchmark, get_etf_cache_status, preload_etf_list
 from core.comparison_calculator import compare_universe_vs_etf
 from utils.logger import setup_logging
 
@@ -108,65 +108,6 @@ init_session_state()
 def get_universe_loader():
     """Restituisce istanza cached dell'universe loader."""
     return UniverseLoader()
-
-
-@st.cache_resource
-def get_justetf_scraper():
-    """Restituisce istanza cached del JustETF scraper."""
-    from scrapers.justetf_scraper import JustETFScraper
-    return JustETFScraper()
-
-
-def check_etf_database_status():
-    """
-    Verifica lo stato del database ETF (cache JustETF).
-
-    Returns:
-        dict con: ready (bool), count (int), expires_in_minutes (int o None)
-    """
-    from time import time
-    scraper = get_justetf_scraper()
-
-    if scraper._overview_cache is not None and scraper._cache_timestamp:
-        elapsed = time() - scraper._cache_timestamp
-        remaining = scraper._cache_ttl - elapsed
-
-        if remaining > 0:
-            return {
-                'ready': True,
-                'count': len(scraper._overview_cache),
-                'expires_in_minutes': int(remaining / 60),
-            }
-
-    return {
-        'ready': False,
-        'count': 0,
-        'expires_in_minutes': None,
-    }
-
-
-def preload_etf_database():
-    """
-    Pre-carica il database JustETF.
-
-    Returns:
-        int: Numero di ETF caricati, 0 se errore
-    """
-    from time import time
-    try:
-        scraper = get_justetf_scraper()
-        df = scraper._get_overview(force_refresh=False)
-
-        # Aggiorna session state
-        st.session_state.etf_db_ready = True
-        st.session_state.etf_db_loaded_at = time()
-        st.session_state.etf_db_count = len(df)
-
-        return len(df)
-    except Exception as e:
-        logger.error(f"Failed to preload ETF database: {e}")
-        st.session_state.etf_db_ready = False
-        return 0
 
 
 def load_universe(uploaded_file):
@@ -402,7 +343,7 @@ def apply_filters(
 # ============================================================================
 
 with st.sidebar:
-    st.title("📊 Selettore v4.0")
+    st.title("📊 Selettore v4.1")
     st.divider()
 
     # =====================================
@@ -440,37 +381,71 @@ with st.sidebar:
     st.divider()
 
     # =====================================
-    # SEZIONE PRE-CARICAMENTO DATABASE ETF
+    # SEZIONE PRE-CARICAMENTO ETF BENCHMARK
     # =====================================
-    st.subheader("📦 Database ETF")
+    st.subheader("📦 Prepara ETF Benchmark")
 
-    db_status = check_etf_database_status()
+    cache_status = get_etf_cache_status()
 
-    if db_status['ready']:
+    if cache_status['count'] > 0:
         st.success(
-            f"✅ Pronto ({db_status['count']} ETF)\n"
-            f"⏱️ Scade tra {db_status['expires_in_minutes']} min"
+            f"✅ {cache_status['count']} ETF pronti\n"
+            f"⏱️ Scade tra {cache_status['expires_in_minutes']} min"
         )
+        with st.expander("📋 ETF in cache"):
+            for isin in cache_status['isins']:
+                st.text(f"• {isin}")
     else:
-        st.warning(
-            "⚠️ Database non caricato\n"
-            "Caricalo prima di confrontare ETF esterni"
+        st.info(
+            "💡 Inserisci gli ISIN degli ETF benchmark\n"
+            "che userai per i confronti"
         )
+
+    # Input per lista ISIN
+    etf_isins_input = st.text_area(
+        "ISIN ETF da pre-caricare",
+        placeholder="Inserisci gli ISIN (uno per riga o separati da virgola):\nIE00B5BMR087\nLU1900068328\nIE00B4L5Y983",
+        height=100,
+        help="Inserisci fino a 15 ISIN di ETF. Verranno scaricati e cachati per 1 ora."
+    )
 
     # Pulsante per pre-caricare
     if st.button(
-        "🔄 CARICA DATABASE ETF" if not db_status['ready'] else "🔄 AGGIORNA DATABASE",
+        "📥 PREPARA ETF",
         use_container_width=True,
-        help="Scarica i dati di 4000+ ETF da JustETF (1-2 minuti). "
-             "Una volta caricato, le ricerche saranno istantanee per 1 ora."
+        type="primary",
+        help="Scarica i dati degli ETF inseriti (~2-3 sec per ETF). "
+             "Le ricerche successive saranno istantanee per 1 ora."
     ):
-        with st.spinner("⏳ Caricamento database ETF in corso... (1-2 minuti)"):
-            count = preload_etf_database()
-            if count > 0:
-                st.success(f"✅ Database caricato: {count} ETF disponibili!")
+        if not etf_isins_input.strip():
+            st.warning("⚠️ Inserisci almeno un ISIN")
+        else:
+            # Parsa gli ISIN (supporta virgola, spazio, newline)
+            import re
+            isins = re.split(r'[,\s\n]+', etf_isins_input.strip())
+            isins = [isin.strip().upper() for isin in isins if isin.strip()]
+
+            if len(isins) > 15:
+                st.warning("⚠️ Massimo 15 ISIN alla volta. Uso i primi 15.")
+                isins = isins[:15]
+
+            with st.spinner(f"⏳ Caricamento {len(isins)} ETF in corso..."):
+                result = preload_etf_list(isins)
+
+            # Mostra risultati
+            if result['loaded']:
+                st.success(f"✅ {len(result['loaded'])} ETF caricati con successo!")
+                for item in result['loaded']:
+                    cached_label = " (già in cache)" if item.get('cached') else ""
+                    st.text(f"  ✓ {item['isin']}: {item['name']}{cached_label}")
+
+            if result['failed']:
+                st.warning(f"⚠️ {len(result['failed'])} ETF non trovati:")
+                for item in result['failed']:
+                    st.text(f"  ✗ {item['isin']}: {item['reason']}")
+
+            if result['loaded']:
                 st.rerun()
-            else:
-                st.error("❌ Errore nel caricamento del database")
 
     st.divider()
 
@@ -705,19 +680,21 @@ else:
                 for inst in st.session_state.universe_instruments
             )
 
-            # Se non è nell'universo e database non pronto, avvisa
-            db_status = check_etf_database_status()
-            if not etf_in_universe and not db_status['ready']:
+            # Se non è nell'universo, verifica se è in cache
+            cache_status = get_etf_cache_status()
+            etf_in_cache = etf_isin_input.strip().upper() in cache_status['isins']
+
+            if not etf_in_universe and not etf_in_cache:
                 st.info(
-                    "ℹ️ L'ETF non è nel tuo universo. "
-                    "Caricamento database esterno in corso (1-2 min)..."
+                    "ℹ️ ETF non in universo/cache. "
+                    "Ricerca su fonti esterne (~5 sec)..."
                 )
 
             # Recupera ETF
             spinner_msg = (
                 "🔍 Ricerca dati ETF..."
-                if etf_in_universe or db_status['ready']
-                else "⏳ Caricamento database ETF esterno (1-2 min)..."
+                if etf_in_universe or etf_in_cache
+                else "⏳ Ricerca ETF su fonti esterne..."
             )
 
             with st.spinner(spinner_msg):
