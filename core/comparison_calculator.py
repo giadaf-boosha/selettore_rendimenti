@@ -85,6 +85,14 @@ class ComparisonReport:
         return None
 
     @property
+    def avg_delta_beating(self) -> Optional[float]:
+        """Media dei delta solo per fondi che battono l'ETF."""
+        deltas = [r.delta for r in self.results if r.beats_etf is True and r.delta is not None]
+        if deltas:
+            return sum(deltas) / len(deltas)
+        return None
+
+    @property
     def best_performer(self) -> Optional[ComparisonResult]:
         """Fondo con il miglior delta."""
         valid = [r for r in self.results if r.delta is not None]

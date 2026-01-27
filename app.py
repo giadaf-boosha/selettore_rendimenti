@@ -735,7 +735,7 @@ else:
         """)
 
         # Metriche confronto
-        col1, col2, col3, col4 = st.columns(4)
+        col1, col2, col3, col4, col5 = st.columns(5)
 
         with col1:
             if etf_perf:
@@ -758,9 +758,15 @@ else:
 
         with col4:
             if report.avg_delta:
-                st.metric("Media Delta", f"{report.avg_delta * 100:+.2f}%")
+                st.metric("Media Delta Tutti", f"{report.avg_delta * 100:+.2f}%")
             else:
-                st.metric("Media Delta", "N/A")
+                st.metric("Media Delta Tutti", "N/A")
+
+        with col5:
+            if report.avg_delta_beating:
+                st.metric("Media Delta Vincenti", f"{report.avg_delta_beating * 100:+.2f}%")
+            else:
+                st.metric("Media Delta Vincenti", "N/A")
 
         st.divider()
 
