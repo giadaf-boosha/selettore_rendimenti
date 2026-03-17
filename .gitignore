@@ -52,8 +52,8 @@ htmlcov/
 .tox/
 .nox/
 
-# Streamlit
-.streamlit/
+# Streamlit (allow config.toml, ignore secrets)
+.streamlit/secrets.toml
 
 # OS
 .DS_Store
