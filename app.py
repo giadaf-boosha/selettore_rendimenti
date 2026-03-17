@@ -16,9 +16,9 @@ Autore: Boosha AI
 Cliente: Massimo Zaffanella - Consulente Finanziario
 Versione: 4.1.0
 """
-# IMPORTANT: Import http_config FIRST to patch requests library
-# This adds realistic User-Agent headers to avoid bot detection
-import utils.http_config  # noqa: F401 - patches requests on import
+# NOTE: http_config monkey-patching disabled on Streamlit Cloud
+# (interferes with Streamlit internal websocket/health checks)
+# import utils.http_config  # noqa: F401 - patches requests on import
 
 import streamlit as st
 import pandas as pd
