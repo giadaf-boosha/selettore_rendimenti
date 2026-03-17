@@ -13,7 +13,6 @@ Funzionalita' v4.1:
 - Pre-caricamento database ETF (4000+ ETF) per ricerche istantanee
 
 Autore: Boosha AI
-Cliente: Massimo Zaffanella - Consulente Finanziario
 Versione: 4.1.0
 """
 # NOTE: http_config monkey-patching disabled on Streamlit Cloud
@@ -909,6 +908,6 @@ else:
 st.divider()
 st.caption(
     f"📊 Selettore Rendimenti Fondi/ETF v{config.version} | "
-    "Sviluppato da Boosha AI per Massimo Zaffanella | "
+    "Sviluppato da Boosha AI | "
     f"© {datetime.now().year}"
 )
