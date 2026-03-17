@@ -4,7 +4,7 @@ pandas>=2.0.0
 python-dotenv>=1.0.0
 
 # Scrapers
-justetf-scraping @ git+https://github.com/druzsan/justetf-scraping.git
+justetf-scraping @ git+https://github.com/druzsan/justetf-scraping.git@d6e5d04
 mstarpy>=4.0.0
 investiny>=0.7.0
 
